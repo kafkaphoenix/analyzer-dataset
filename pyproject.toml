@@ -1,0 +1,152 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tiktok-dataset"
+version = "0.1.0"
+description = "Tiktok dataset study"
+readme = "README.md"
+requires-python = "~=3.13.0"
+dependencies = [
+    "click==8.5.0",
+    "cudf-cu13==26.8",
+    "cudf-polars-cu13==26.8.1",
+    "duckdb==1.5.5",
+    "polars==1.42.1",
+    "psutil==7.2.2",
+    "pyarrow==23.0.0", # Needs to be less than 24 for compatibility with cudf-polars-cu13
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "nvidia-ml-py==13.610.43",
+    "typer==0.27.2",
+]
+
+[project.scripts]
+process = "tiktok_dataset.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tiktok_dataset"]
+
+[dependency-groups]
+dev = [
+    "mypy==2.3.1",
+    "pyarrow-stubs==20.0.0.20260819",
+    "types-psutil==7.2.2.20260906",
+    "ruff==0.16.6",
+    "typos==1.50.1",
+]
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".git",
+    ".venv",
+    "build",
+    "dist",
+    "__init__.py",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "datasets",
+    "results",
+]
+
+# Same as Black.
+line-length = 130
+indent-width = 4
+
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",   # Errores de Pycodestyle (todos, no solo E4/7/9)
+    "W",   # Advertencias de Pycodestyle (ej: líneas demasiado largas, espacios al final)
+    "F",   # Pyflakes (errores de lógica, variables no usadas, etc.)
+    "I",   # Isort (organización y orden de imports automático)
+    "B",   # flake8-bugbear (encuentra bugs sutiles y trampas de diseño en Python)
+    "C901",# Complejidad de McCabe (te avisa si una función es demasiado compleja)
+    "UP",  # pyupgrade (sugiere automáticamente sintaxis moderna de Python 3.8+)
+    "RUF", # Reglas internas de Ruff (cruciales para evitar errores específicos de rendimiento)
+]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
+#
+# This is currently disabled by default, but it is planned for this
+# to be opt-out in the future.
+docstring-code-format = false
+
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+#
+# This only has an effect when the `docstring-code-format` setting is
+# enabled.
+docstring-code-line-length = "dynamic"
+
+[tool.typos]
+default.locale = "en-us"
+
+[tool.typos.files]
+extend-exclude = [
+    ".git/",
+    "build/",
+    "dist/",
+    "poetry.lock",
+    "uv.lock",
+    "datasets/",
+    "results/",
+    ".ruff_cache/",
+    ".mypy_cache/",
+    ".pytest_cache/",
+    ".venv/",
+]
+
+[tool.mypy]
+python_version = 3.13
+exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "__init__.py",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+]
+disallow_untyped_defs = true
+disallow_any_unimported = false # to prevent any type issues with cudf and pynvml
+no_implicit_optional = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["cudf.*", "pynvml.*"]
+ignore_missing_imports = true
