@@ -35,6 +35,8 @@ dev = [
     "types-psutil==7.2.2.20260906",
     "ruff==0.16.6",
     "typos==1.50.1",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
 ]
 
 [tool.ruff]
@@ -51,6 +53,7 @@ exclude = [
     ".ruff_cache",
     "datasets",
     "results",
+    "tests",
 ]
 
 # Same as Black.
@@ -122,6 +125,7 @@ extend-exclude = [
     ".mypy_cache/",
     ".pytest_cache/",
     ".venv/",
+    "tests/",
 ]
 
 [tool.mypy]
@@ -135,6 +139,7 @@ exclude = [
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
+    "tests",
 ]
 disallow_untyped_defs = true
 disallow_any_unimported = false # to prevent any type issues with cudf and pynvml
@@ -150,3 +155,24 @@ pretty = true
 [[tool.mypy.overrides]]
 module = ["cudf.*", "pynvml.*"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = [
+    "-ra",  # show extra test summary info
+    "--strict-markers",
+    "--strict-config",
+    "--tb=short",  # show shorter tracebacks for easier reading
+    "--maxfail=5",  # stop after 5 failures
+    "--import-mode=importlib",
+]
+testpaths = [
+    "tests",
+]
+pythonpath = [
+    "src",
+]
+python_files = "*test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+asyncio_mode = "auto"

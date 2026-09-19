@@ -15,3 +15,6 @@ lint: ## Run linters
 mypy: ## Run mypy type checks
 	uv run mypy --config-file pyproject.toml .
 
+.PHONY: test
+test: ## Run tests; use 'k' to specify a keyword for test selection
+	uv run pytest -v $(if $(k),-k "$(k)")

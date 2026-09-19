@@ -2,77 +2,36 @@ from __future__ import annotations
 
 import subprocess
 
-CHUNK_READ_LIMITS = [
-    64 * 1024 * 1024,    # 64 MB
-    128 * 1024 * 1024,   # 128 MB
-    256 * 1024 * 1024,   # 256 MB
-    512 * 1024 * 1024,   # 512 MB
-    1024 * 1024 * 1024,  # 1 GB
-    2048 * 1024 * 1024,  # 2 GB
-    4096 * 1024 * 1024,  # 4 GB
-]
+# Configured in MiB integers to satisfy Pydantic Field constraints [ge=256, le=2048] directly via CLI
+CHUNK_READ_LIMITS_MIB = [256, 512, 1024, 2048]
 
 
-def format_size(size: int) -> str:
-    if size >= 1024**3:
-        return f"{size / 1024**3:g} GB"
-
-    return f"{size / 1024**2:g} MB"
-
-
-def run_benchmark(chunk_read_limit: int) -> str:
+def run_benchmark(chunk_read_limit_mib: int) -> str:
     """
     ==================================================
-    Chunk Read Limit     | cuDF Time      
+    Chunk Read Limit     | cuDF Time
     --------------------------------------------------
-    64 MB                | 33.24s         
-    128 MB               | 23.90s         
-    256 MB               | 19.87s         
-    512 MB               | 16.05s         
-    1 GB                 | 16.54s         
-    2 GB                 | 16.08s         
-    4 GB                 | 15.99s         
+    256 MiB              | 20.31s
+    512 MiB              | 16.87s
+    1024 MiB             | 15.82s
+    2048 MiB             | 16.52s
     ==================================================
     """
-    size = format_size(chunk_read_limit)
+    print(f"▶ Starting CUDF with chunk_read_limit={chunk_read_limit_mib} MiB...", end="", flush=True)
 
-    print(
-        f"▶ Starting CUDF with chunk_read_limit={size}...",
-        end="",
-        flush=True,
-    )
-
-    cmd = [
-        "uv",
-        "run",
-        "process",
-        "-q",
-        "cudf",
-        "--cudf-chunk-read-limit",
-        str(chunk_read_limit),
-    ]
+    # FIXED: Passes the raw MiB numerical scale integer to align with Pydantic validation barriers seamlessly
+    cmd = ["uv", "run", "process", "-q", "cudf", "--cudf-chunk-read-limit", str(chunk_read_limit_mib)]
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         time_taken = "N/A"
-
         for line in result.stdout.splitlines():
             if "Query time:" in line:
-                time_taken = line.replace(
-                    "Query time:",
-                    "",
-                ).strip()
+                time_taken = line.replace("Query time:", "").strip()
                 break
 
         print(f" ✔ Completed in {time_taken}!")
         return time_taken
-
     except subprocess.CalledProcessError as e:
         print(" ❌ ERROR")
         print(f"Error details:\n{e.stderr}")
@@ -84,26 +43,15 @@ def main() -> None:
     print(" ▶ Starting cuDF Chunk Read Limit Benchmark ")
     print("=" * 60)
 
-    results: dict[int, str] = {}
-
-    for chunk_read_limit in CHUNK_READ_LIMITS:
-        results[chunk_read_limit] = run_benchmark(
-            chunk_read_limit,
-        )
+    results = {}
+    for limit_mib in CHUNK_READ_LIMITS_MIB:
+        results[limit_mib] = run_benchmark(limit_mib)
 
     print("\n" + "=" * 50)
-    print(
-        f"{'Chunk Read Limit':<20} | {'cuDF Time':<15}"
-    )
+    print(f"{'Chunk Read Limit':<20} | {'cuDF Time':<15}")
     print("-" * 50)
-
-    for chunk_read_limit, time_taken in results.items():
-        size = format_size(chunk_read_limit)
-
-        print(
-            f"{size:<20} | {time_taken:<15}"
-        )
-
+    for limit_mib, time_taken in results.items():
+        print(f"{f'{limit_mib} MiB':<20} | {time_taken:<15}")
     print("=" * 50)
 
 

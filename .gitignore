@@ -5,6 +5,7 @@ __pycache__/
 *$py.class
 datasets/
 results/
+test.py
 
 # Distribution / packaging
 .Python

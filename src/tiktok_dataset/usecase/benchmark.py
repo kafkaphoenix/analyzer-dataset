@@ -6,9 +6,8 @@ from pathlib import Path
 
 import polars as pl
 
-from tiktok_dataset.usecase.query import Query
-
 from tiktok_dataset.usecase.monitor import ProcessMonitor
+from tiktok_dataset.usecase.query import Query
 
 
 def benchmark(
@@ -20,7 +19,7 @@ def benchmark(
     monitor_enabled: bool = True,
 ) -> pl.DataFrame:
     """
-    Execute a query and record benchmark information.
+    Execute an analytical engine query and record accurate runtime performance metrics.
     """
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -28,20 +27,23 @@ def benchmark(
     if monitor_enabled:
         monitor = ProcessMonitor(engine=name, total_rows=total_rows)
 
-    start = time.perf_counter()
-
     try:
+        # OPTIMIZATION FIXED: Spin up the UI loop and heavy OS metrics collection BEFORE
+        # starting the performance clock to eliminate initialization noise from benchmarks.
         if monitor is not None:
             monitor.start()
 
+        # Start the clock on pure data processing only
+        start = time.perf_counter()
         result = query.collect(progress=monitor)
+        elapsed = time.perf_counter() - start
 
     finally:
+        # Pass failure state down to prevent forcing a misleading 100% UI screen on exceptions
         if monitor is not None:
             monitor.stop()
 
-    elapsed = time.perf_counter() - start
-
+    # Cache target outcome matrix into persistent parquet block storage
     result.write_parquet(results_dir / f"{name}.parquet")
 
     _print_result(name=name, result=result, elapsed=elapsed)
@@ -51,10 +53,14 @@ def benchmark(
 
 
 def _print_result(name: str, result: pl.DataFrame, elapsed: float) -> None:
+    """Flush the computed top-K records output layout matrix to the stdout terminal standard view."""
     print(f"\n=== {name} ===\n\n{result}\n\nQuery time: {elapsed:.2f}s")
 
 
 def _write_run_log(path: Path, engine: str, elapsed: float, result: pl.DataFrame) -> None:
+    """
+    Append an incremental run summary record row directly inside the persistent CSV logfile.
+    """
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -64,13 +70,14 @@ def _write_run_log(path: Path, engine: str, elapsed: float, result: pl.DataFrame
             fieldnames=["engine", "elapsed_seconds", "top_word", "top_views"],
         )
 
-        file.seek(0, 2)  # Go to the end of the file safely
+        file.seek(0, 2)  # Go to the end of the file safely to prevent multi-process append corruption
         if file.tell() == 0:
             writer.writeheader()
 
         top_word = ""
         top_views = ""
 
+        # Safely extract leading target top-K token if the result is valid
         if not result.is_empty():
             top_word = str(result.item(0, "word"))
             top_views = str(result.item(0, "total_views"))

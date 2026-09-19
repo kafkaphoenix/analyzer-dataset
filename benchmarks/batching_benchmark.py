@@ -1,41 +1,26 @@
 import subprocess
 
-BATCH_SIZES = [
-    500_000,
-    1_000_000,
-    2_500_000,
-    5_000_000,
-    10_000_000,
-    15_000_000,
-    20_000_000,
-]
-
+BATCH_SIZES = [500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000, 15_000_000, 20_000_000]
 ENGINES = ["cpu", "gpu"]
 
 
 def run_benchmark(engine: str, batch_size: int) -> str:
-    """
-    ==================================================
-    Batch Size      | CPU Time        | GPU Time       
-    --------------------------------------------------
-    500,000         | 19.44s          | 29.72s         
-    1,000,000       | 19.08s          | 22.57s         
-    2,500,000       | 19.87s          | 21.46s         
-    5,000,000       | 19.54s          | 20.42s         
-    10,000,000      | 19.13s          | 19.95s         
-    15,000,000      | 19.70s          | 19.95s         
-    20,000,000      | 20.22s          | 20.40s         
-    ==================================================
-    """
     print(f"▶ Starting {engine.upper()} with batch_size={batch_size:,}...", end="", flush=True)
 
     batch_flag = "--cpu-batch-size" if engine == "cpu" else "--gpu-batch-size"
 
+    # Base command structure pointing to the correct Typer entrypoint
     cmd = ["uv", "run", "process", "-q", engine, batch_flag, str(batch_size)]
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    # OPTIMIZATION FIXED: Conditionally inject the monitor flag (-m) ONLY for the CPU
+    # engine. Since capture_output=True is active below, Rich's terminal layout updates
+    # will be fully silenced, preventing console clutter while forcing the chunked execution path.
+    if engine == "cpu":
+        cmd.append("-m")
 
+    try:
+        # capture_output=True absorbs both standard outputs, rendering the background execution invisible
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         time_taken = "N/A"
         for line in result.stdout.splitlines():
             if "Query time:" in line:
@@ -52,17 +37,14 @@ def run_benchmark(engine: str, batch_size: int) -> str:
 
 def main() -> None:
     print("=" * 60)
-    print(" ▶ Starting Benchmark Matrix (Without Monitor) ")
+    print(" ▶ Starting Benchmark Matrix ")
     print("=" * 60)
 
     results: dict[int, dict[str, str]] = {size: {} for size in BATCH_SIZES}
-
     for batch_size in BATCH_SIZES:
         for engine in ENGINES:
-            time_taken = run_benchmark(engine, batch_size)
-            results[batch_size][engine] = time_taken
+            results[batch_size][engine] = run_benchmark(engine, batch_size)
 
-    # Print a scannable summary in table format
     print("\n" + "=" * 50)
     print(f"{'Batch Size':<15} | {'CPU Time':<15} | {'GPU Time':<15}")
     print("-" * 50)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Callable
 from typing import Protocol
 
 import polars as pl
@@ -25,11 +25,4 @@ class Query(Protocol):
         ...
 
 
-class QueryBuilder(Protocol):
-    def __call__(
-        self,
-        parquet_path: Path,
-        english_words_path: Path,
-        top_k: int,
-        **kwargs: object,
-    ) -> Query: ...
+QueryBuilder = Callable[..., Query]

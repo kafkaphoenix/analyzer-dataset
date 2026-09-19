@@ -8,6 +8,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """
+    Application settings and validation schema utilizing Pydantic.
+    Loads configuration matrices directly from environment variables
+    prefixed with 'TIKTOK_' or an active local '.env' file layer.
+    """
+
     dataset: Path = Path("datasets/videos-00.parquet")
     english_words: Path = Path("datasets/english_words.txt")
 
@@ -18,6 +24,7 @@ class Settings(BaseSettings):
         gt=0,
     )
 
+    # only relevant when using monitoring features
     default_batch_size_cpu: int = Field(
         default=1_000_000,
         ge=500_000,
@@ -31,7 +38,7 @@ class Settings(BaseSettings):
     )
 
     cudf_chunk_read_limit_mib: int = Field(
-        default=512,
+        default=1024,
         ge=256,
         le=2048,
     )
@@ -50,6 +57,7 @@ class Settings(BaseSettings):
     @field_validator("duckdb_threads")
     @classmethod
     def validate_duckdb_threads(cls, v: int | None) -> int | None:
+        """Ensure the allocated DuckDB thread budget does not exceed physical CPU cores."""
         if v is None:
             return v
 
@@ -62,4 +70,5 @@ class Settings(BaseSettings):
 
     @property
     def cudf_chunk_read_limit(self) -> int:
+        """Convert the Mebibytes (MiB) limit specification dynamically into absolute bytes."""
         return self.cudf_chunk_read_limit_mib * 1024 * 1024

@@ -4,16 +4,11 @@ from pathlib import Path
 
 import cudf
 import polars as pl
-import pyarrow as pa
 import pylibcudf as plc
 
 from tiktok_dataset.domain.tokenizer import (
     ASCII_LOWER_MAP,
-    BARE_DOMAIN_PATTERN,
-    EMAIL_PATTERN,
-    MENTION_PATTERN_CUDF,
-    HASHTAG_PATTERN_CUDF,
-    URL_SCHEME_PATTERN,
+    CLEAN_PATTERN_CUDF,
     WORD_PATTERN_CUDF,
 )
 from tiktok_dataset.repository.vocabulary import (
@@ -22,38 +17,6 @@ from tiktok_dataset.repository.vocabulary import (
 from tiktok_dataset.usecase.query import ProgressReporter
 
 ENGINE = "cudf"
-
-_REGEX_DEFAULT_FLAGS = 0
-
-_REPLACEMENT_SPACE = plc.Scalar.from_arrow(pa.scalar(" ", type=pa.string()))
-
-_URL_SCHEME_PROGRAM = plc.strings.regex_program.RegexProgram.create(URL_SCHEME_PATTERN, _REGEX_DEFAULT_FLAGS)
-_BARE_DOMAIN_PROGRAM = plc.strings.regex_program.RegexProgram.create(BARE_DOMAIN_PATTERN, _REGEX_DEFAULT_FLAGS)
-
-# Cheap literal substrings used only to build the candidate-row mask --
-# NOT the matching pattern itself, so this list can be over-inclusive
-# (e.g. "t.co" also matches inside "t.company") without any correctness
-# cost: rows it wrongly flags just run the real, precise regex and come
-# back unchanged. It must never be UNDER-inclusive, so keep it in sync
-# with the domain literals inside BARE_DOMAIN_PATTERN in tokenizer.py.
-_BARE_DOMAIN_LITERALS = (
-    "bit.ly",
-    "t.co",
-    "goo.gl",
-    "youtube.com",
-    "youtu.be",
-    "tinyurl.com",
-    "linktr.ee",
-    "amzn.to",
-)
-
-_EMAIL_PROGRAM = plc.strings.regex_program.RegexProgram.create(EMAIL_PATTERN, _REGEX_DEFAULT_FLAGS)
-_MENTION_PROGRAM = plc.strings.regex_program.RegexProgram.create(MENTION_PATTERN_CUDF, _REGEX_DEFAULT_FLAGS)
-_HASHTAG_PROGRAM = plc.strings.regex_program.RegexProgram.create(HASHTAG_PATTERN_CUDF, _REGEX_DEFAULT_FLAGS)
-# Order matters: same precedence as the old single combined alternation
-# (URL scheme, then email, then mention, then hashtag), applied to the
-# full column after the bare-domain step has already run on its subset.
-_FULL_COLUMN_PROGRAMS = (_EMAIL_PROGRAM, _MENTION_PROGRAM, _HASHTAG_PROGRAM)
 
 
 class GPUCUDFQuery:
@@ -90,18 +53,6 @@ class GPUCUDFQuery:
         if len(df) == 0:
             return None
 
-        # `to_pylibcudf()`/`from_pylibcudf()` round-trip through a raw
-        # pylibcudf Column, which has no index concept at all -- every
-        # `cudf.Series.from_pylibcudf(...)` call below comes back with a
-        # fresh default RangeIndex, NOT `df`'s real (possibly non-contiguous,
-        # since `dropna()` above doesn't reset it) row labels. Capture the
-        # real index once here and restore it onto `desc` after every such
-        # round trip, or `desc` silently drifts out of alignment with
-        # `df["views"]` by the time they're recombined below -- in whichever
-        # chunks actually had a null row dropped, which is exactly the small,
-        # rare-word-count drift this caused against DuckDB/Polars.
-        original_index = df.index
-
         # Architectural Note: `.str.translate` is chosen here because we are performing a
         # strict 1-to-1 character lookup map (A-Z to a-z), which maps perfectly to a blazing-fast
         # CUDA array lookup kernel.
@@ -111,36 +62,7 @@ class GPUCUDFQuery:
         # handle it. In that specific scenario, we would instead use `.str.replace_many`,
         # which is cuDF's native, highly parallelized solution for bulk substring replacement
         # without launching multiple costly sequential `.str.replace` iterations.
-        desc = df["desc"].str.translate(ASCII_LOWER_MAP)
-
-        # Standard scheme-based URLs (http://, https://, www.) -- cheap, and
-        # correct to run against every row.
-        col, meta = desc.to_pylibcudf()
-        col = plc.strings.replace_re.replace_re(col, _URL_SCHEME_PROGRAM, _REPLACEMENT_SPACE)
-        desc = cudf.Series.from_pylibcudf(col, metadata=meta)
-        desc.index = original_index
-
-        # Bare domains (bit.ly, youtube.com, ...) are rare, so only run the
-        # expensive alternation-heavy pattern on rows a cheap literal
-        # substring search flags as candidates (see module-level comment).
-        bare_domain_mask = None
-        for literal in _BARE_DOMAIN_LITERALS:
-            hit = desc.str.contains(literal, regex=False)
-            bare_domain_mask = hit if bare_domain_mask is None else (bare_domain_mask | hit)
-
-        if bare_domain_mask.any():
-            subset = desc.loc[bare_domain_mask]
-            sub_col, sub_meta = subset.to_pylibcudf()
-            sub_col = plc.strings.replace_re.replace_re(sub_col, _BARE_DOMAIN_PROGRAM, _REPLACEMENT_SPACE)
-            replaced = cudf.Series.from_pylibcudf(sub_col, metadata=sub_meta)
-            replaced.index = subset.index
-            desc.loc[bare_domain_mask] = replaced
-
-        col, meta = desc.to_pylibcudf()
-        for program in _FULL_COLUMN_PROGRAMS:
-            col = plc.strings.replace_re.replace_re(col, program, _REPLACEMENT_SPACE)
-        desc = cudf.Series.from_pylibcudf(col, metadata=meta)
-        desc.index = original_index
+        desc = df["desc"].str.translate(ASCII_LOWER_MAP).str.replace(CLEAN_PATTERN_CUDF, " ", regex=True)
 
         # Extract words and keep unique tokens per description row
         words = desc.str.findall(WORD_PATTERN_CUDF).list.unique()
@@ -200,10 +122,8 @@ class GPUCUDFQuery:
 
         if not partial_results:
             return cudf.DataFrame(
-                {
-                    "word": cudf.Series([], dtype="object"),
-                    "total_views": cudf.Series([], dtype="uint64"),
-                }
+                {"word": [], "total_views": []},
+                dtype={"word": "object", "total_views": "uint64"},
             )
 
         return cudf.concat(partial_results, ignore_index=True)

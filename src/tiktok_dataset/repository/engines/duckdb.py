@@ -9,8 +9,10 @@ import polars as pl
 import pyarrow as pa
 
 from tiktok_dataset.domain.tokenizer import (
-    CLEAN_PATTERN,
-    WORD_PATTERN,
+    ASCII_LOWER,
+    ASCII_UPPER,
+    CLEAN_PATTERN_DUCKDB,
+    WORD_PATTERN_DUCKDB,
 )
 from tiktok_dataset.repository.vocabulary import (
     load_english_words,
@@ -24,17 +26,11 @@ class DuckDBQuery:
     """
     DuckDB implementation.
 
-    Normal path: a single fused query does
-    tokenization, aggregation and top-k/sort in one shot, no
-    intermediate materialization.
-
-    Monitored path: tokenization is split into its own step,
-    materialized into a temp table, because `query_progress()`
-    is only a reliable signal for that step, it's a plain
-    scan/filter/regex query with no row-count-changing operators.
-    The `unnest` + semi-join + `group by` step that follows has a
-    cardinality-estimation blind spot around `unnest`, so its
-    progress isn't tracked; it's relatively short compared to the tokenization step.
+    Normal path: a single fused query does tokenization, aggregation
+    and top-k/sort in one shot, avoiding intermediate materialization.
+    Monitored path: tokenization is split into its own step and materialized
+    into a temporary table because query_progress() requires a materialization
+    boundary to emit reliable progress signals.
     """
 
     def __init__(
@@ -50,27 +46,37 @@ class DuckDBQuery:
         self.threads = threads
 
     def _build_fused_query(self) -> str:
+        """Build the single-phase fused query for unmonitored execution."""
         parquet_path = str(self.parquet_path)
+
         return f"""
             WITH tokenized AS (
                 SELECT
                     views,
                     regexp_extract_all(
                         regexp_replace(
-                            lower("desc"),
-                            '{CLEAN_PATTERN}',
+                            translate(
+                                "desc",
+                                '{ASCII_UPPER}',
+                                '{ASCII_LOWER}'
+                            ),
+                            '{CLEAN_PATTERN_DUCKDB}',
                             ' ',
                             'g'
                         ),
-                        '{WORD_PATTERN}'
+                        '{WORD_PATTERN_DUCKDB}'
                     ) AS words
                 FROM read_parquet('{parquet_path}')
-                WHERE "desc" IS NOT NULL AND views IS NOT NULL
+                WHERE
+                    "desc" IS NOT NULL
+                    AND views IS NOT NULL
             ),
             unique_words AS (
                 SELECT
                     views,
-                    unnest(list_distinct(words)) AS word
+                    unnest(
+                        list_distinct(words)
+                    ) AS word
                 FROM tokenized
             ),
             english_only AS (
@@ -91,30 +97,41 @@ class DuckDBQuery:
         """
 
     def _build_tokenization_query(self) -> str:
+        """Build Phase 1 query to materialize intermediate list results and track progress."""
         parquet_path = str(self.parquet_path)
+
         return f"""
             CREATE TEMP TABLE tokenized_data AS
             SELECT
                 views,
                 regexp_extract_all(
                     regexp_replace(
-                        lower("desc"),
-                        '{CLEAN_PATTERN}',
+                        translate(
+                            "desc",
+                            '{ASCII_UPPER}',
+                            '{ASCII_LOWER}'
+                        ),
+                        '{CLEAN_PATTERN_DUCKDB}',
                         ' ',
                         'g'
                     ),
-                    '{WORD_PATTERN}'
+                    '{WORD_PATTERN_DUCKDB}'
                 ) AS words
             FROM read_parquet('{parquet_path}')
-            WHERE "desc" IS NOT NULL AND views IS NOT NULL;
+            WHERE
+                "desc" IS NOT NULL
+                AND views IS NOT NULL;
         """
 
     def _build_aggregation_query(self) -> str:
+        """Build Phase 2 query to unpack tokens and run global Top-K reduction."""
         return f"""
             WITH unique_words AS (
                 SELECT
                     views,
-                    unnest(list_distinct(words)) AS word
+                    unnest(
+                        list_distinct(words)
+                    ) AS word
                 FROM tokenized_data
             ),
             english_only AS (
@@ -149,7 +166,7 @@ class DuckDBQuery:
         self,
         connection: duckdb.DuckDBPyConnection,
     ) -> pl.DataFrame:
-        """Single fused query: no materialization, no progress tracking."""
+        """Single fused query execution without progress overhead."""
         return connection.execute(self._build_fused_query()).pl()
 
     def _collect_monitored(
@@ -157,13 +174,7 @@ class DuckDBQuery:
         connection: duckdb.DuckDBPyConnection,
         progress: ProgressReporter,
     ) -> pl.DataFrame:
-        """
-        Two-phase: tokenization is tracked via `query_progress()`
-        (reliable here, since this query has no row-count-changing
-        operators); aggregation is fast by comparison and its
-        progress isn't reliably trackable, so it's reported as one
-        jump to completion.
-        """
+        """Two-phase query execution with real-time background progress polling."""
         connection.execute("SET enable_progress_bar = true")
         connection.execute("SET enable_progress_bar_print = false")
 
@@ -179,12 +190,15 @@ class DuckDBQuery:
             daemon=True,
             name="duckdb-tokenize",
         )
+
         tokenize_thread.start()
 
         while tokenize_thread.is_alive():
             percentage = connection.query_progress()
+
             if percentage >= 0:
                 progress.update_percentage(percentage)
+
             time.sleep(0.2)
 
         tokenize_thread.join()
@@ -193,8 +207,11 @@ class DuckDBQuery:
             raise exception_container["exception"]
 
         progress.update_percentage(99.0)
+
         result = connection.execute(self._build_aggregation_query()).pl()
+
         connection.execute("DROP TABLE IF EXISTS tokenized_data")
+
         progress.update_percentage(100.0)
 
         return result
@@ -203,6 +220,7 @@ class DuckDBQuery:
         self,
         progress: ProgressReporter | None = None,
     ) -> pl.DataFrame:
+        """Public entry point to resolve the dataset query using DuckDB."""
         connection = duckdb.connect()
 
         try:
@@ -217,7 +235,10 @@ class DuckDBQuery:
             if progress is None:
                 return self._collect(connection)
 
-            return self._collect_monitored(connection, progress)
+            return self._collect_monitored(
+                connection,
+                progress,
+            )
 
         finally:
             connection.close()
@@ -227,7 +248,7 @@ def build_query(
     parquet_path: Path,
     english_words_path: Path,
     top_k: int,
-    duckdb_threads: int | None,
+    duckdb_threads: int,
     **_: object,
 ) -> DuckDBQuery:
     return DuckDBQuery(

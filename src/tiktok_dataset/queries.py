@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import typing
 from pathlib import Path
 
 from tiktok_dataset.repository.engines.cudf import (
@@ -15,6 +14,7 @@ from tiktok_dataset.repository.engines.polars_cpu import (
 from tiktok_dataset.repository.engines.polars_gpu import (
     GPUQuery,
 )
+from tiktok_dataset.usecase.query import Query, QueryBuilder
 
 
 def build_cpu(
@@ -23,7 +23,8 @@ def build_cpu(
     top_k: int,
     batch_size_cpu: int,
     **_: object,
-) -> CPUQuery:
+) -> Query:
+    """Factory builder for the Polars CPU streaming query engine."""
     return CPUQuery(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
@@ -38,7 +39,8 @@ def build_polars_gpu(
     top_k: int,
     batch_size_gpu: int,
     **_: object,
-) -> GPUQuery:
+) -> Query:
+    """Factory builder for the Polars Hybrid GPU execution plan engine."""
     return GPUQuery(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
@@ -53,7 +55,8 @@ def build_cudf(
     top_k: int,
     cudf_chunk_read_limit: int,
     **_: object,
-) -> GPUCUDFQuery:
+) -> Query:
+    """Factory builder for the native GPU cuDF/libcudf streaming engine."""
     return GPUCUDFQuery(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
@@ -66,9 +69,10 @@ def build_duckdb(
     parquet_path: Path,
     english_words_path: Path,
     top_k: int,
-    duckdb_threads: int | None,
+    duckdb_threads: int,
     **_: object,
-) -> DuckDBQuery:
+) -> Query:
+    """Factory builder for the DuckDB analytical vector streaming engine."""
     return DuckDBQuery(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
@@ -77,7 +81,9 @@ def build_duckdb(
     )
 
 
-QUERIES: dict[str, typing.Callable] = {
+# Central registry map linking engine option string tokens to their respective factory definitions.
+# This matrix satisfies type constraints defined within the QueryBuilder structural protocol.
+QUERIES: dict[str, QueryBuilder] = {
     "cpu": build_cpu,
     "gpu": build_polars_gpu,
     "cudf": build_cudf,

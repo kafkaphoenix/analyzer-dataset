@@ -56,21 +56,25 @@ class ProcessMonitor:
         )
 
         self._last_metrics: SystemMetrics | None = None
+        self._last_metrics_time = 0.0
+        self._metrics_sample_interval = 0.3
 
     def start(self) -> None:
+        """Start the live view and initialize system monitoring."""
         from tiktok_dataset.repository.system_monitor import (
             SystemMonitor,
         )
 
         self.start_time = time.perf_counter()
+        self._system_monitor = SystemMonitor().__enter__()
 
-        self._system_monitor = SystemMonitor()
+        self._refresh_metrics()
+        self._last_metrics_time = self.start_time
 
         self._live = Live(
             self._render(),
             refresh_per_second=5,
         )
-
         self._live.start()
 
     def update(
@@ -78,12 +82,7 @@ class ProcessMonitor:
         completed_rows: int,
         total_rows: int | None = None,
     ) -> None:
-        """
-        Update process progress.
-
-        Engines call this after processing a batch of the process.
-        """
-
+        """Update process progress based on rows processed."""
         self.completed_rows = completed_rows
 
         if total_rows is not None:
@@ -95,17 +94,11 @@ class ProcessMonitor:
             total=self.total_rows,
         )
 
-        self._refresh_metrics()
-        self._refresh()
+        self._maybe_refresh_metrics()
 
     def update_percentage(self, percentage: float) -> None:
-        """
-        Update process progress based on a percentage.
-
-        Engines call this to report process progress as a percentage.
-        """
+        """Update process progress based on a float percentage."""
         percentage = max(0.0, min(100.0, percentage))
-
         self.completed_rows = int(self.total_rows * percentage / 100.0)
 
         self._progress.update(
@@ -114,10 +107,10 @@ class ProcessMonitor:
             total=self.total_rows,
         )
 
-        self._refresh_metrics()
-        self._refresh()
+        self._maybe_refresh_metrics()
 
     def stop(self) -> None:
+        """Gracefully close monitoring and finish at 100%."""
         if self.total_rows > 0:
             self.completed_rows = self.total_rows
 
@@ -134,46 +127,54 @@ class ProcessMonitor:
             self._live = None
 
         if self._system_monitor is not None:
-            self._system_monitor.close()
+            self._system_monitor.__exit__(
+                None,
+                None,
+                None,
+            )
             self._system_monitor = None
 
+    def _maybe_refresh_metrics(self) -> None:
+        """Refresh system metrics when the sampling interval expires."""
+        current_time = time.perf_counter()
+
+        if current_time - self._last_metrics_time >= self._metrics_sample_interval:
+            self._refresh_metrics()
+            self._last_metrics_time = current_time
+            self._refresh()
+
     def _refresh_metrics(self) -> None:
+        """Capture the latest system metrics."""
         if self._system_monitor is None:
             return
 
         self._last_metrics = self._system_monitor.sample()
 
     def _refresh(self) -> None:
+        """Force an immediate Rich layout refresh."""
         if self._live is not None:
-            self._live.update(
-                self._render(),
-                refresh=True,
-            )
+            self._live.update(self._render())
 
     def _render(self) -> Group:
+        """Generate the Rich Live UI."""
         elapsed = 0.0
 
         if self.start_time is not None:
             elapsed = time.perf_counter() - self.start_time
 
-        percentage = self.completed_rows / self.total_rows * 100 if self.total_rows else 0.0
+        if self.total_rows > 0:
+            percentage = self.completed_rows / self.total_rows * 100
+        else:
+            percentage = 0.0
 
         rows = f"{self.completed_rows:,} / {self.total_rows:,}"
 
-        table = Table.grid(
-            padding=(0, 2),
-        )
-
-        table.add_row(
-            "Rows",
-            rows,
-        )
-
+        table = Table.grid(padding=(0, 2))
+        table.add_row("Rows", rows)
         table.add_row(
             "Progress",
             f"{percentage:.2f}%",
         )
-
         table.add_row(
             "Elapsed",
             f"{elapsed:.1f}s",
@@ -186,17 +187,14 @@ class ProcessMonitor:
                 "CPU",
                 f"{metrics.cpu_percent:.1f}%",
             )
-
             table.add_row(
                 "Threads",
                 str(metrics.process_threads),
             )
-
             table.add_row(
                 "CPU Temp",
                 f"{metrics.cpu_temperature:.0f}°C",
             )
-
             table.add_row(
                 "RAM",
                 (f"{metrics.memory_used_gb:.1f} / {metrics.memory_total_gb:.1f} GB ({metrics.memory_percent:.1f}%)"),
@@ -207,7 +205,6 @@ class ProcessMonitor:
                     "GPU",
                     f"{metrics.gpu_utilization:.1f}%",
                 )
-
                 table.add_row(
                     "VRAM",
                     (
@@ -216,16 +213,12 @@ class ProcessMonitor:
                         f"({metrics.gpu_memory_percent:.1f}%)"
                     ),
                 )
-
                 table.add_row(
                     "GPU Temp",
                     f"{metrics.gpu_temperature:.0f}°C",
                 )
             else:
-                table.add_row(
-                    "GPU",
-                    "N/A",
-                )
+                table.add_row("GPU", "N/A")
 
         return Group(
             Panel(
