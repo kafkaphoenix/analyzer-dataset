@@ -6,10 +6,9 @@ from typing import cast
 import polars as pl
 
 from tiktok_dataset.domain.tokenizer import (
-    ASCII_LOWER_MAP,
-    CLEAN_PATTERN_POLARS,
-    WORD_PATTERN,
+    WORD_PATTERN_POLARS,
 )
+from tiktok_dataset.repository.engines.polars_common import clean_desc_polars
 from tiktok_dataset.repository.vocabulary import (
     load_english_words,
 )
@@ -44,11 +43,15 @@ class CPUQuery:
         self,
         parquet_path: Path,
         english_words_path: Path,
+        english_stopwords_path: Path,
+        min_word_length: int,
         top_k: int,
         batch_size: int,
     ):
         self.parquet_path = parquet_path
         self.english_words_path = english_words_path
+        self.english_stopwords_path = english_stopwords_path
+        self.min_word_length = min_word_length
         self.top_k = top_k
         self.batch_size = batch_size
 
@@ -58,16 +61,17 @@ class CPUQuery:
         include_row_index: bool,
     ) -> pl.LazyFrame:
         """
-        Define the lazy transformation steps for reading, tokenizing, and filtering text.
-        This method constructs the logical execution plan (or recipe) without executing
-        it. It will be resolved using Polars' streaming engine on the CPU.
+        Define the lazy transformation steps for reading, tokenizing,
+        and filtering text.
+
+        This method constructs the logical execution plan without
+        executing it. It is resolved using Polars' streaming engine.
         """
-        # Avoid selecting the row index column unless necessary for monitoring
         keep = [_ROW_INDEX_COL] if include_row_index else []
 
         scan = pl.scan_parquet(
             self.parquet_path,
-            row_index_name=_ROW_INDEX_COL if include_row_index else None,
+            row_index_name=(_ROW_INDEX_COL if include_row_index else None),
         )
 
         return (
@@ -78,16 +82,11 @@ class CPUQuery:
             )
             .filter(pl.col("desc").is_not_null() & pl.col("views").is_not_null())
             .with_columns(
-                pl.col("desc")
-                .str.replace_many(
-                    ASCII_LOWER_MAP,
-                )
-                .str.replace_all(
-                    CLEAN_PATTERN_POLARS,
-                    " ",
+                clean_desc_polars(
+                    pl.col("desc"),
                 )
                 .str.extract_all(
-                    WORD_PATTERN,
+                    WORD_PATTERN_POLARS,
                 )
                 .list.unique()
                 .alias("word")
@@ -120,15 +119,23 @@ class CPUQuery:
         value_col: str = "total_views",
     ) -> pl.DataFrame:
         """
-        Processes the unified LazyFrame using the streaming engine to run the final
-        group-by, Top-K extraction, and sorting.
+        Process the unified LazyFrame using the streaming engine
+        to run the final group-by, Top-K extraction, and sorting.
         """
         return (
             partials.group_by("word")
             .agg(pl.col(value_col).sum().alias("total_views"))
-            .top_k(top_k, by="total_views")
-            .sort("total_views", descending=True)
-            .collect(engine="streaming")
+            .top_k(
+                top_k,
+                by="total_views",
+            )
+            .sort(
+                "total_views",
+                descending=True,
+            )
+            .collect(
+                engine="streaming",
+            )
         )
 
     def _collect(
@@ -136,12 +143,17 @@ class CPUQuery:
         english_words: pl.LazyFrame,
     ) -> pl.DataFrame:
         """
-        Execute a single fused lazy query over the entire file on the CPU.
-        Bypasses batching entirely when no monitoring is requested, allowing
-        Polars to optimize memory mapping and streaming allocations natively.
+        Execute a single fused lazy query over the entire file.
+
+        Bypasses batching entirely when no monitoring is requested,
+        allowing Polars to optimize memory mapping and streaming
+        allocations natively.
         """
         return self._finalize(
-            self._build_execution_plan(english_words, include_row_index=False),
+            self._build_execution_plan(
+                english_words,
+                include_row_index=False,
+            ),
             self.top_k,
             value_col="views",
         )
@@ -152,12 +164,18 @@ class CPUQuery:
         progress: ProgressReporter,
     ) -> pl.DataFrame:
         """
-        Execute the query through streaming chunks with real-time progress monitoring.
-        Tracks actual read performance by extracting the maximum row index position
-        stamped at scan time from the stream. Chunks are aggregated eagerly inside
-        the loop to maintain an unbloated RAM footprint.
+        Execute the query through streaming chunks with real-time
+        progress monitoring.
+
+        Tracks actual read performance by extracting the maximum
+        row index position stamped at scan time from the stream.
+        Chunks are aggregated eagerly inside the loop to maintain
+        a low RAM footprint.
         """
-        query = self._build_execution_plan(english_words, include_row_index=True)
+        query = self._build_execution_plan(
+            english_words,
+            include_row_index=True,
+        )
 
         partial_results: list[pl.DataFrame] = []
         completed_rows = 0
@@ -171,27 +189,43 @@ class CPUQuery:
                 progress.update(completed_rows)
                 continue
 
-            max_row_index = cast(int | None, batch[_ROW_INDEX_COL].max())
+            max_row_index = cast(
+                int | None,
+                batch[_ROW_INDEX_COL].max(),
+            )
+
             if max_row_index is not None:
                 completed_rows = max(
                     completed_rows,
                     max_row_index + 1,
                 )
 
-            # Eagerly aggregate the chunk to keep memory consumption low
             partial_results.append(batch.drop(_ROW_INDEX_COL).group_by("word").agg(pl.col("views").sum().alias("total_views")))
 
             progress.update(completed_rows)
 
         if not partial_results:
             return pl.DataFrame(
-                {"word": [], "total_views": []},
-                schema={"word": pl.String, "total_views": pl.UInt64},
+                {
+                    "word": [],
+                    "total_views": [],
+                },
+                schema={
+                    "word": pl.String,
+                    "total_views": pl.UInt64,
+                },
             )
 
-        # Merge eager DataFrames and feed them into _finalize as a lazy frame
-        partials = pl.concat(partial_results, how="vertical")
-        return self._finalize(partials.lazy(), self.top_k, value_col="total_views")
+        partials = pl.concat(
+            partial_results,
+            how="vertical",
+        )
+
+        return self._finalize(
+            partials.lazy(),
+            self.top_k,
+            value_col="total_views",
+        )
 
     def collect(
         self,
@@ -200,18 +234,35 @@ class CPUQuery:
         """
         Public entry point to resolve the dataset query on the CPU.
         """
-        english_words = pl.DataFrame({"word": list(load_english_words(self.english_words_path))}).lazy()
+        english_words = pl.DataFrame(
+            {
+                "word": list(
+                    load_english_words(
+                        self.english_words_path,
+                        self.english_stopwords_path,
+                        min_word_length=self.min_word_length,
+                    )
+                )
+            }
+        ).lazy()
 
         if progress is None:
-            return self._collect(english_words)
+            return self._collect(
+                english_words,
+            )
 
-        return self._collect_monitored(english_words, progress)
+        return self._collect_monitored(
+            english_words,
+            progress,
+        )
 
 
 def build_query(
     parquet_path: Path,
     english_words_path: Path,
     top_k: int,
+    english_stopwords_path: Path,
+    min_word_length: int,
     batch_size: int,
     **_: object,
 ) -> CPUQuery:
@@ -219,5 +270,7 @@ def build_query(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
         top_k=top_k,
+        english_stopwords_path=english_stopwords_path,
+        min_word_length=min_word_length,
         batch_size=batch_size,
     )

@@ -100,6 +100,8 @@ def run(
     query = query_builder(
         parquet_path=settings.dataset,
         english_words_path=settings.english_words,
+        english_stopwords_path=settings.english_stopwords,
+        min_word_length=settings.min_word_length,
         top_k=settings.top_k,
         batch_size_cpu=settings.default_batch_size_cpu,
         batch_size_gpu=settings.default_batch_size_gpu,

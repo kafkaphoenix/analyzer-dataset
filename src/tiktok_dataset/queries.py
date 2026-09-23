@@ -20,6 +20,8 @@ from tiktok_dataset.usecase.query import Query, QueryBuilder
 def build_cpu(
     parquet_path: Path,
     english_words_path: Path,
+    english_stopwords_path: Path,
+    min_word_length: int,
     top_k: int,
     batch_size_cpu: int,
     **_: object,
@@ -29,6 +31,8 @@ def build_cpu(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
         top_k=top_k,
+        english_stopwords_path=english_stopwords_path,
+        min_word_length=min_word_length,
         batch_size=batch_size_cpu,
     )
 
@@ -36,6 +40,8 @@ def build_cpu(
 def build_polars_gpu(
     parquet_path: Path,
     english_words_path: Path,
+    english_stopwords_path: Path,
+    min_word_length: int,
     top_k: int,
     batch_size_gpu: int,
     **_: object,
@@ -45,6 +51,8 @@ def build_polars_gpu(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
         top_k=top_k,
+        english_stopwords_path=english_stopwords_path,
+        min_word_length=min_word_length,
         batch_size=batch_size_gpu,
     )
 
@@ -52,6 +60,8 @@ def build_polars_gpu(
 def build_cudf(
     parquet_path: Path,
     english_words_path: Path,
+    english_stopwords_path: Path,
+    min_word_length: int,
     top_k: int,
     cudf_chunk_read_limit: int,
     **_: object,
@@ -60,6 +70,8 @@ def build_cudf(
     return GPUCUDFQuery(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
+        english_stopwords_path=english_stopwords_path,
+        min_word_length=min_word_length,
         top_k=top_k,
         chunk_read_limit=cudf_chunk_read_limit,
     )
@@ -68,6 +80,8 @@ def build_cudf(
 def build_duckdb(
     parquet_path: Path,
     english_words_path: Path,
+    english_stopwords_path: Path,
+    min_word_length: int,
     top_k: int,
     duckdb_threads: int,
     **_: object,
@@ -76,6 +90,8 @@ def build_duckdb(
     return DuckDBQuery(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
+        english_stopwords_path=english_stopwords_path,
+        min_word_length=min_word_length,
         top_k=top_k,
         threads=duckdb_threads,
     )

@@ -1,4 +1,4 @@
-from tests.fixtures.tokenizer_cases import TokenizerCase
+from tests.scenarios.tokenizer_cases import TokenizerCase
 
 SIMPLE_ASCII_CASES = (
     TokenizerCase(

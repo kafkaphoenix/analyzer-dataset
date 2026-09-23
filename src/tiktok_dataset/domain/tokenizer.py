@@ -34,7 +34,7 @@ results/tokenizer_mismatches.parquet. Also see benchmark/english_tokenizer_misma
 # into a single-quoted SQL string, and a literal `'` in the pattern
 # would break that string. Worst case a URL containing an apostrophe
 # stops matching one character early -- narrower than `\S+`.
-_URL_CHARS = r"[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]"
+_URL_CHARS = r"[A-Za-z0-9._~:/?#@!$&()*+,;=%…-]"
 
 # Scheme-based URLs (http://, https://, www.) are cheap to match: every
 # engine's regex engine can key off the fixed `http`/`www` literal at the
@@ -96,70 +96,53 @@ BARE_DOMAIN_PATTERN = (
 # from what those two now say.
 URL_PATTERN = rf"{URL_SCHEME_PATTERN}|{BARE_DOMAIN_PATTERN}"
 
-# --------------------------------------------------------------------
-# Hashtags
-# --------------------------------------------------------------------
-# Ref: https://www.unicode.org/reports/tr31/tr31-39.html?utm_source=chatgpt.com#hashtag_identifiers
-# Ref: https://en.wikipedia.org/wiki/Hashtag
-# Hashtags legitimately contain letters from any script -- Burmese,
-# Devanagari, Thai, Cyrillic, decorative "fancy font" Unicode, etc.
-# `\w` is the wrong tool for this: RE2's `\w` is ASCII-only by default,
-# and libcudf's `\w`, while Unicode-aware, covers a much narrower set of
-# scripts than either RE2 or Rust's `regex` crate.
+# Hashtags continue until whitespace or another '#' is encountered.
+# Any other character is valid inside a hashtag, including ASCII and
+# Unicode punctuation, symbols, and emoji.
 #
-# For Polars/DuckDB, `\p{L}\p{N}_` (explicit Unicode property
-# escapes) sidesteps RE2's ASCII-only `\w` shorthand entirely and
-# was verified byte-for-byte against DuckDB on every real mismatch
-# case found in the corpus -- duckdb_vs_polars is now 0 across the
-# full dataset. `\p{M}` (combining marks) was tried too at one point
-# and dropped: nothing in the corpus-driven testing showed it was
-# needed, and leaving it out keeps the class smaller.
+#   #hello!world           -> #hello!world
+#   #hello-world           -> #hello-world
+#   #،like                 -> #،like
+#   #hello©world           -> #hello©world
+#   #hello😀world           -> #hello😀world
+#   #maharastra𓽤khudko    -> #maharastra𓽤khudko
+#   #hola#hola             -> #hola, #hola
+#   #hello world           -> #hello, world
 
-# A negated/exclusion-based version of this pattern was tried first
-# (match anything that ISN'T whitespace/punctuation, instead of
-# enumerating what a hashtag IS) specifically to avoid needing to
-# know libcudf's Unicode coverage at all. It was rejected: without
-# real whitespace between hashtags, the match doesn't stop at emoji
-# either, and it swallowed entire captions.
-
-# Polars' regex Unicode tables treat U+13F64 as \p{L}/\p{N},
-# while DuckDB and cuDF stop the hashtag at this character.
-# So Polars needs to explicitly exclude this character from its hashtag matches.
-POLARS_REGEX_COMPATIBILITY_DELIMITERS = "\U00013f64"
-
-HASHTAG_PATTERN_DUCKDB = r"#[\p{L}\p{M}\p{N}_]+"
-
-HASHTAG_PATTERN_POLARS = (
-    rf"#[\p{{L}}\p{{M}}\p{{N}}_&&[^{POLARS_REGEX_COMPATIBILITY_DELIMITERS}]]+"
+# Unicode whitespace that must terminate a hashtag.
+# Keep this explicit because DuckDB/RE2 does not classify all Unicode
+# whitespace characters the same way as Polars/Rust regex and cuDF.
+_HASHTAG_WHITESPACE = (
+    " "
+    "\t"
+    "\n"
+    "\r"
+    "\f"
+    "\v"
+    "\u0085"  # NEXT LINE
+    "\u00a0"  # NO-BREAK SPACE
+    "\u1680"  # OGHAM SPACE MARK
+    "\u2000"  # EN QUAD
+    "\u2001"  # EM QUAD
+    "\u2002"  # EN SPACE
+    "\u2003"  # EM SPACE
+    "\u2004"  # THREE-PER-EM SPACE
+    "\u2005"  # FOUR-PER-EM SPACE
+    "\u2006"  # SIX-PER-EM SPACE
+    "\u2007"  # FIGURE SPACE
+    "\u2008"  # PUNCTUATION SPACE
+    "\u2009"  # THIN SPACE
+    "\u200a"  # HAIR SPACE
+    "\u2028"  # LINE SEPARATOR
+    "\u2029"  # PARAGRAPH SEPARATOR
+    "\u202f"  # NARROW NO-BREAK SPACE
+    "\u205f"  # MEDIUM MATHEMATICAL SPACE
+    "\u3000"  # IDEOGRAPHIC SPACE
 )
 
-# cuDF's regex engine doesn't support `\p{...}` syntax at all -- it
-# doesn't error, it silently matches nothing. It also doesn't accept
-#  `\U0001D400`-style escape sequences inside a character class --
-# those are silently ignored too.
-# What *does* work: splicing the actual UTF-8 characters in as
-# literal range bounds, which only requires the engine to handle
-# ordinary multi-byte range endpoints, not parse an escape sequence.
-#
-# These four ranges are the specific scripts the real dataset
-# surfaced through several rounds of corpus-driven testing. This list is NOT
-# an exhaustive Unicode letter table -- it's whatever this dataset
-# happened to contain. A future data refresh could surface another
-# script-specific gap the same shape as these; if it does, extend
-# this list the same way.
-_MATH_ALPHANUMERIC = "\U0001d400-\U0001d7ff"
-_EGYPTIAN_HIEROGLYPHS = "\U00013000-\U0001342f"
-_CUNEIFORM = "\U00012000-\U000123ff"
-_BAMUM = "\U00016800-\U00016a3f"
-_LINEAR_B = "\U00010000-\U0001007f"
-_DEVANAGARI = "\u0900-\u097f"
-_BENGALI = "\u0980-\u09ff"
-_TAMIL = "\u0b80-\u0bff"
-_TELUGU = "\u0c00-\u0c7f"
-_KANNADA = "\u0c80-\u0cff"
-_MALAYALAM = "\u0d00-\u0d7f"
-_THAI = "\u0e00-\u0e7f"
-HASHTAG_PATTERN_CUDF = f"#[\\w{_MATH_ALPHANUMERIC}{_EGYPTIAN_HIEROGLYPHS}{_CUNEIFORM}{_BAMUM}{_LINEAR_B}{_DEVANAGARI}{_BENGALI}{_TAMIL}{_TELUGU}{_KANNADA}{_MALAYALAM}{_THAI}]+"
+HASHTAG_PATTERN_DUCKDB = rf"#[^{_HASHTAG_WHITESPACE}#@]+"
+HASHTAG_PATTERN_POLARS = r"#[^\s#@]+"
+HASHTAG_PATTERN_CUDF = r"#[^\s#@]+"
 
 # --------------------------------------------------------------------
 # Email addresses
@@ -172,60 +155,36 @@ EMAIL_DOMAIN = rf"{_EMAIL_DOMAIN_LABEL}(?:\.{_EMAIL_DOMAIN_LABEL})+"
 
 EMAIL_PATTERN = rf"{EMAIL_LOCAL}@{EMAIL_DOMAIN}"
 
+# The trailing negative lookahead prevents partial matches such as
+# "foo@example.com_extra", but libcudf's regex engine does not support
+# lookahead assertions, so this cannot be used in the cuDF regex pattern.
+# EMAIL_PATTERN = rf"{EMAIL_LOCAL}@{EMAIL_DOMAIN}(?![A-Za-z0-9_.+-])"
+
 # --------------------------------------------------------------------
 # @ mentions
 # --------------------------------------------------------------------
-# TikTok usernames allow letters, numbers, underscore, and period --
-# but NOT a leading, trailing, or doubled period. Rather than encode
-# that as a lookaround (unsupported by RE2, Rust's regex crate, and
-# libcudf alike), it falls out for free from a "segments joined by a
-# single period" structure: [segment]+(?:\.[segment]+)*. A trailing
-# or leading period can never match (the \. group always requires a
-# following non-empty segment, and the pattern must start with one);
-# a doubled period simply ends the match early, same as the existing
-# "stop at the first non-matching character" behavior everywhere else
-# in this module (see the emoji/symbol hashtag-boundary cases).
-_MENTION_SEGMENT = r"[\p{L}\p{N}_]"
-MENTION_PATTERN_DUCKDB = rf"@{_MENTION_SEGMENT}+(?:\.{_MENTION_SEGMENT}+)*"  # DuckDB
+# Same boundary rule as hashtags: @ followed by a run of anything
+# that isn't whitespace or another @. Replaces the old per-engine
+# \p{L}\p{N}_ / explicit-script-range approach -- that required
+# manually whitelisting every historic Unicode block that could
+# appear in a username (Linear A/B, Old Italic, Warang Citi,
+# Mongolian, Elbasan, Caucasian Albanian, ...) for cuDF specifically,
+# since libcudf's regex has no \p{L}. Every missed block was a
+# silent cuDF-only mismatch -- consuming until a boundary character
+# sidesteps script coverage entirely instead of enumerating it.
+#
+# Uses _HASHTAG_WHITESPACE rather than native \s for DuckDB, for the
+# same reason HASHTAG_PATTERN_DUCKDB does: RE2's \s and Rust/libcudf's
+# \s don't agree on which code points count as whitespace.
+MENTION_PATTERN_DUCKDB = rf"@[^{_HASHTAG_WHITESPACE}@#]+"
+MENTION_PATTERN_POLARS = r"@[^\s@#]+"
+MENTION_PATTERN_CUDF = r"@[^\s@#]+"
 
-# Same U+13F64 carve-out as HASHTAG_PATTERN_POLARS -- Polars' Unicode
-# tables classify it as \p{L}/\p{N} where DuckDB/cuDF don't.
-_MENTION_SEGMENT_POLARS = (
-    rf"[\p{{L}}\p{{N}}_&&[^{POLARS_REGEX_COMPATIBILITY_DELIMITERS}]]"
-)
-MENTION_PATTERN_POLARS = (
-    rf"@{_MENTION_SEGMENT_POLARS}+(?:\.{_MENTION_SEGMENT_POLARS}+)*"
-)
+CLEAN_PATTERN_POLARS = f"{URL_PATTERN}|{EMAIL_PATTERN}|{MENTION_PATTERN_POLARS}|{HASHTAG_PATTERN_POLARS}"
+CLEAN_PATTERN_DUCKDB = f"{URL_PATTERN}|{EMAIL_PATTERN}|{MENTION_PATTERN_DUCKDB}|{HASHTAG_PATTERN_DUCKDB}"
 
-# Same \w + explicit script-range splice as HASHTAG_PATTERN_CUDF,
-# since libcudf's regex engine silently no-ops on \p{...} syntax.
-_MENTION_CHARS_CUDF = (
-    rf"\w{_MATH_ALPHANUMERIC}{_EGYPTIAN_HIEROGLYPHS}{_CUNEIFORM}{_BAMUM}{_LINEAR_B}"
-)
-MENTION_PATTERN_CUDF = (
-    rf"@[{_MENTION_CHARS_CUDF}]+(?:\.[{_MENTION_CHARS_CUDF}]+)*"
-)
-
-CLEAN_PATTERN_POLARS = (
-    f"{URL_PATTERN}|"
-    f"{EMAIL_PATTERN}|"
-    f"{MENTION_PATTERN_POLARS}|"
-    f"{HASHTAG_PATTERN_POLARS}|"
-    f"{POLARS_REGEX_COMPATIBILITY_DELIMITERS}"
-)
-CLEAN_PATTERN_DUCKDB = (
-    f"{URL_PATTERN}|"
-    f"{EMAIL_PATTERN}|"
-    f"{MENTION_PATTERN_DUCKDB}|"
-    f"{HASHTAG_PATTERN_DUCKDB}"
-
-)
-CLEAN_PATTERN_CUDF = (
-    f"{URL_PATTERN}|"
-    f"{EMAIL_PATTERN}|"
-    f"{MENTION_PATTERN_CUDF}|"
-    f"{HASHTAG_PATTERN_CUDF}"
-)
+# Better performance if regex are applied separately rather than combined for cuDF.
+#CLEAN_PATTERN_CUDF = f"{EMAIL_PATTERN}|{URL_PATTERN}|{MENTION_PATTERN_CUDF}|{HASHTAG_PATTERN_CUDF}"
 
 # --------------------------------------------------------------------
 # Words
@@ -236,6 +195,7 @@ CLEAN_PATTERN_CUDF = (
 # depends on lowering happening via ASCII_LOWER_MAP (below), not
 # each engine's own `lower()` -- see that section for why.
 WORD_PATTERN = r"[a-z]{3,}"
+WORD_PATTERN_POLARS = WORD_PATTERN
 WORD_PATTERN_DUCKDB = WORD_PATTERN
 WORD_PATTERN_CUDF = WORD_PATTERN
 

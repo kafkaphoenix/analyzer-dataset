@@ -16,6 +16,11 @@ class Settings(BaseSettings):
 
     dataset: Path = Path("datasets/videos-00.parquet")
     english_words: Path = Path("datasets/english_words.txt")
+    english_stopwords: Path = Path("datasets/nltk_english_stopwords.txt")
+    min_word_length: int = Field(
+        default=3,
+        gt=0,
+    )
 
     results_dir: Path = Path("results")
 

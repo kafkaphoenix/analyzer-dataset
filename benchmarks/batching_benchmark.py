@@ -12,9 +12,9 @@ def run_benchmark(engine: str, batch_size: int) -> str:
     # Base command structure pointing to the correct Typer entrypoint
     cmd = ["uv", "run", "process", "-q", engine, batch_flag, str(batch_size)]
 
-    # OPTIMIZATION FIXED: Conditionally inject the monitor flag (-m) ONLY for the CPU
-    # engine. Since capture_output=True is active below, Rich's terminal layout updates
-    # will be fully silenced, preventing console clutter while forcing the chunked execution path.
+    # CPU uses the fused unmonitored path when monitoring is disabled,
+    # which does not use batch_size. Enable monitoring here to force the
+    # chunked CPU execution path so batch_size actually affects execution.
     if engine == "cpu":
         cmd.append("-m")
 

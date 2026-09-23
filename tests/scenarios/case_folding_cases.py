@@ -1,5 +1,4 @@
-from tests.fixtures.tokenizer_cases import TokenizerCase
-
+from tests.scenarios.tokenizer_cases import TokenizerCase
 
 CASE_FOLDING_CASES = (
     TokenizerCase(
