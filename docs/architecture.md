@@ -138,7 +138,9 @@ src/tiktok_dataset/domain/tokenizer.py
 
 This module contains the shared pattern definitions and constants used by the engine implementations.
 
-The actual cleaning pipeline remains engine-specific because the regular expression and string-processing APIs differ between Polars, cuDF/libcudf, and DuckDB.
+The tokenizer patterns and normalization rules are centralized in the
+domain layer. Each engine then applies those rules using its native
+string and regular-expression operations.
 
 ### Polars
 
@@ -431,20 +433,18 @@ The following timings are from the current full-dataset execution using the conf
 | -------- | ---------: |
 | `cpu`    |    17.89 s |
 | `gpu`    |    18.85 s |
-| `cudf`   |    20.89 s |
+| `cudf`   |    30.36 s |
 | `duckdb` |    51.04 s |
 
 The current Top-K result for the CPU, hybrid GPU, and DuckDB implementations is:
 
 | Word   |    Total views |
 | ------ | -------------: |
-| `like` | 38,260,772,442 |
-| `one`  | 33,539,828,101 |
-| `love` | 31,954,636,055 |
+| `like` | 38,260,773,895 |
+| `one`  | 33,539,828,808 |
+| `love` | 31,954,636,512 |
 | `new`  | 28,776,351,509 |
 | `get`  | 28,741,882,933 |
-
-The native cuDF execution currently returns the same Top-K words and matching values for `like`, `new`, and `get`, while the remaining values are being investigated as part of the ongoing cross-engine validation work.
 
 The benchmark figures are execution snapshots rather than fixed performance guarantees. Runtime can vary with system load, memory state, GPU state, batch size, and monitoring configuration.
 

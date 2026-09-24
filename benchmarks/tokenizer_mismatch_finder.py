@@ -19,7 +19,7 @@ from tiktok_dataset.domain.tokenizer import (
     WORD_PATTERN_POLARS,
 )
 from tiktok_dataset.repository.engines.cudf import (
-    clean_desc_cudf,
+    clean_desc_cudf_fast,
 )
 from tiktok_dataset.repository.engines.duckdb import (
     clean_desc_duckdb,
@@ -208,7 +208,7 @@ def cudf_tokens(
     if len(df) == 0:
         return empty_result()
 
-    desc = clean_desc_cudf(df["desc"])
+    desc = clean_desc_cudf_fast(df["desc"])
 
     words = desc.str.findall(WORD_PATTERN_CUDF).list.unique()
 
@@ -496,7 +496,7 @@ def find_word_rows_cudf(
             }
         )
 
-    desc = clean_desc_cudf(df["desc"])
+    desc = clean_desc_cudf_fast(df["desc"])
 
     words = desc.str.findall(WORD_PATTERN_CUDF).list.unique()
 
