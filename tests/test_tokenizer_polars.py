@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from tests.scenarios.tokenizer_cases import TokenizerCase, strip_trailing_url_punctuation
+from tests.scenarios.tokenizer_cases import TokenizerCase, strip_trailing_url_punctuation, strip_leading_url_boundary
 from tiktok_dataset.domain.tokenizer import (
     EMAIL_PATTERN,
     HASHTAG_PATTERN_POLARS,
@@ -53,7 +53,7 @@ def tokenize(
         )["matches"][0]
         .to_list()
     )
-    urls = list(strip_trailing_url_punctuation(url) for url in urls)
+    urls = list(strip_trailing_url_punctuation(strip_leading_url_boundary(url)) for url in urls)
 
     # 3. Extract mentions after removing emails and URLs.
     mentions = (

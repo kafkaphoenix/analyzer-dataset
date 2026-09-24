@@ -473,6 +473,201 @@ def clean_desc_cudf(
 
     return result
 
+def clean_desc_cudf_fast(
+    desc: cudf.Series,
+) -> cudf.Series:
+    """
+    Apply the native cuDF production cleaning pipeline.
+
+    Order:
+
+    1. Remove known corrupted binary payloads.
+    2. ASCII lowercase A-Z.
+    3. Remove scheme-based URLs.
+    4. Remove bare domains on candidate rows only.
+    5. Remove emails.
+    6. Remove @mentions.
+    7. Remove hashtags.
+
+    Unlike Polars/DuckDB -- which compile everything into one
+    alternation and resolve overlaps by leftmost match, making their
+    listed order mostly cosmetic -- cuDF applies each pattern as its
+    own sequential pass over already-modified text. What an earlier
+    pass consumes is gone before a later pass ever sees it, so this
+    order is NOT cosmetic and NOT just "matching" the other engines;
+    it is its own contract, driven by two rules:
+
+    - Narrower character classes run before broader ones. URL_SCHEME
+      and BARE_DOMAIN only ever match ASCII URL characters; MENTION
+      and HASHTAG match almost anything except whitespace/@/#,
+      including every emoji and every Unicode script. Running
+      mention/hashtag first lets that broad class swallow a URL glued
+      directly onto it (common in TikTok bios: "@promobit.ly/deal")
+      plus whatever real word follows through an emoji separator,
+      since nothing but whitespace stops it.
+    - URL_SCHEME runs before BARE_DOMAIN, and BARE_DOMAIN runs before
+      EMAIL: _URL_CHARS includes '@', '.', and '/', so an email-
+      shaped substring inside a URL path is correctly swallowed
+      whole by the URL patterns. Reversing this lets EMAIL consume
+      the "user@site.co" portion of "bit.ly/user@site.co" first,
+      stripping the path bit.ly/t.co/goo.gl's REQUIRE_PATH check
+      depends on -- causing the match to fail and leaking "bit" or
+      "goo" as a spurious 3+ letter word.
+    - EMAIL still runs before MENTION: an email's '@' is not itself a
+      mention trigger, but MENTION's pattern doesn't know that -- it
+      matches starting AT any '@' regardless of what precedes it, so
+      "user@gmail.com" would otherwise be cut to "@gmail.com",
+      stranding "user" as a leaked word.
+
+    Bare domains are handled separately because applying their
+    relatively expensive regex to every row is avoided through a
+    cheap candidate-row mask.
+
+    The same function is used by the production query and by the
+    tokenizer differential diagnostic so that the diagnostic cannot
+    accidentally test a different cuDF implementation.
+    """
+    original_index = desc.index
+
+    # ---------------------------------------------------------------
+    # 1. Remove known corrupted binary payloads.
+    # ---------------------------------------------------------------
+    col, meta = desc.to_pylibcudf()
+
+    col = plc.strings.replace_re.replace_re(
+        col,
+        _CORRUPTED_PAYLOAD_PROGRAM,
+        _EMPTY_REPLACEMENT,
+    )
+
+    desc = cudf.Series.from_pylibcudf(
+        col,
+        metadata=meta,
+    )
+    desc.index = original_index
+
+    # ---------------------------------------------------------------
+    # 2. ASCII lowercase A-Z.
+    # ---------------------------------------------------------------
+    desc = desc.str.translate(
+        ASCII_LOWER_MAP
+    )
+
+    # ---------------------------------------------------------------
+    # 3. Remove scheme-based URLs.
+    # ---------------------------------------------------------------
+    col, meta = desc.to_pylibcudf()
+
+    col = plc.strings.replace_re.replace_re(
+        col,
+        _URL_SCHEME_PROGRAM,
+        _REPLACEMENT_SPACE,
+    )
+
+    desc = cudf.Series.from_pylibcudf(
+        col,
+        metadata=meta,
+    )
+    desc.index = original_index
+
+    # ---------------------------------------------------------------
+    # 4. Remove bare domains only on candidate rows.
+    # ---------------------------------------------------------------
+    bare_domain_mask = None
+
+    for literal in _BARE_DOMAIN_LITERALS:
+        hit = desc.str.contains(
+            literal,
+            regex=False,
+        )
+
+        bare_domain_mask = (
+            hit
+            if bare_domain_mask is None
+            else bare_domain_mask | hit
+        )
+
+    if (
+        bare_domain_mask is not None
+        and bare_domain_mask.any()
+    ):
+        subset = desc.loc[
+            bare_domain_mask
+        ]
+
+        sub_col, sub_meta = (
+            subset.to_pylibcudf()
+        )
+
+        sub_col = plc.strings.replace_re.replace_re(
+            sub_col,
+            _BARE_DOMAIN_PROGRAM,
+            _REPLACEMENT_SPACE,
+        )
+
+        replaced = cudf.Series.from_pylibcudf(
+            sub_col,
+            metadata=sub_meta,
+        )
+        replaced.index = subset.index
+
+        desc.loc[
+            bare_domain_mask
+        ] = replaced
+
+    # ---------------------------------------------------------------
+    # 5. Remove emails.
+    # ---------------------------------------------------------------
+    col, meta = desc.to_pylibcudf()
+
+    col = plc.strings.replace_re.replace_re(
+        col,
+        _EMAIL_PROGRAM,
+        _REPLACEMENT_SPACE,
+    )
+
+    desc = cudf.Series.from_pylibcudf(
+        col,
+        metadata=meta,
+    )
+    desc.index = original_index
+
+    # ---------------------------------------------------------------
+    # 6. Remove @mentions.
+    # ---------------------------------------------------------------
+    col, meta = desc.to_pylibcudf()
+
+    col = plc.strings.replace_re.replace_re(
+        col,
+        _MENTION_PROGRAM,
+        _REPLACEMENT_SPACE,
+    )
+
+    desc = cudf.Series.from_pylibcudf(
+        col,
+        metadata=meta,
+    )
+    desc.index = original_index
+
+    # ---------------------------------------------------------------
+    # 7. Remove hashtags.
+    # ---------------------------------------------------------------
+    col, meta = desc.to_pylibcudf()
+
+    col = plc.strings.replace_re.replace_re(
+        col,
+        _HASHTAG_PROGRAM,
+        _REPLACEMENT_SPACE,
+    )
+
+    desc = cudf.Series.from_pylibcudf(
+        col,
+        metadata=meta,
+    )
+    desc.index = original_index
+
+    return desc
+
 
 class GPUCUDFQuery:
     """
@@ -520,7 +715,7 @@ class GPUCUDFQuery:
 
         # clean_desc_cudf() preserves the original index through all
         # pylibcudf round-trips, which keeps desc aligned with views.
-        desc = clean_desc_cudf(
+        desc = clean_desc_cudf_fast(
             df["desc"]
         )
 

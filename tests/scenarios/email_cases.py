@@ -112,7 +112,7 @@ EMAIL_CASES = (
     ),
 
     TokenizerCase(
-        name="email with numeric domain label",
+        name="email domain containing incidental www. substring",
         text="Contact edit@2rawww.japan now",
         expected_hashtags=(),
         expected_mentions=(),

@@ -5,6 +5,7 @@ import cudf
 from tests.scenarios.tokenizer_cases import (
     TokenizerCase,
     strip_trailing_url_punctuation,
+    strip_leading_url_boundary,
 )
 from tiktok_dataset.domain.tokenizer import (
     BARE_DOMAIN_PATTERN,
@@ -15,7 +16,7 @@ from tiktok_dataset.domain.tokenizer import (
     URL_SCHEME_PATTERN,
     WORD_PATTERN_CUDF,
 )
-from tiktok_dataset.repository.engines.cudf import clean_desc_cudf
+from tiktok_dataset.repository.engines.cudf import clean_desc_cudf_fast
 
 
 def tokenize(
@@ -23,31 +24,18 @@ def tokenize(
 ) -> tuple[list[str], list[str], list[str], list[str], str, list[str]]:
     df = cudf.DataFrame({"text": [text]})
 
-    # This diagnostic pipeline is not the same execution order as production.
-    # It is semantically equivalent: emails are protected first so URL-like
-    # domains inside an email are not reported as separate tokens. Production
-    # uses its optimized cleanup paths, while clean_desc_cudf() remains the
-    # source of truth for the final words.
-    emails = df["text"].str.findall(
-        EMAIL_PATTERN,
-    ).iloc[0]
+    source = df["text"]
 
-    emails = list(emails) if emails is not None else []
-
-    source = df["text"].str.replace(
-        EMAIL_PATTERN,
-        " ",
-        regex=True,
-    )
-
-    # URLs are only used for the diagnostic assertion.
+    # URLs.
     urls = source.str.findall(
         URL_PATTERN,
     ).iloc[0]
 
     urls = (
         [
-            strip_trailing_url_punctuation(url)
+            strip_trailing_url_punctuation(
+                strip_leading_url_boundary(url)
+            )
             for url in urls
         ]
         if urls is not None
@@ -64,6 +52,19 @@ def tokenize(
     # Bare domains.
     source = source.str.replace(
         BARE_DOMAIN_PATTERN,
+        " ",
+        regex=True,
+    )
+
+    # Emails.
+    emails = source.str.findall(
+        EMAIL_PATTERN,
+    ).iloc[0]
+
+    emails = list(emails) if emails is not None else []
+
+    source = source.str.replace(
+        EMAIL_PATTERN,
         " ",
         regex=True,
     )
@@ -88,8 +89,14 @@ def tokenize(
 
     hashtags = list(hashtags) if hashtags is not None else []
 
+    source = source.str.replace(
+        HASHTAG_PATTERN_CUDF,
+        " ",
+        regex=True,
+    )
+
     # Words come directly from the real production implementation.
-    cleaned = clean_desc_cudf(
+    cleaned = clean_desc_cudf_fast(
         df["text"],
     )
 

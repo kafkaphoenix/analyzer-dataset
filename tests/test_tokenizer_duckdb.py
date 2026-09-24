@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import duckdb
 
-from tests.scenarios.tokenizer_cases import TokenizerCase, strip_trailing_url_punctuation
+from tests.scenarios.tokenizer_cases import TokenizerCase, strip_trailing_url_punctuation, strip_leading_url_boundary
 from tiktok_dataset.domain.tokenizer import (
     EMAIL_PATTERN,
     HASHTAG_PATTERN_DUCKDB,
@@ -57,7 +57,7 @@ def tokenize(
             [text],
         ).fetchone()[0]
 
-        urls = list(strip_trailing_url_punctuation(url) for url in urls)
+        urls = list(strip_trailing_url_punctuation(strip_leading_url_boundary(url)) for url in urls)
 
         # 3. Remove emails and URLs before extracting mentions.
         #

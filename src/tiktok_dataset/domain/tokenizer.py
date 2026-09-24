@@ -20,80 +20,62 @@ results/tokenizer_mismatches.parquet. Also see benchmark/english_tokenizer_misma
 # --------------------------------------------------------------------
 # URLs / known link-shortener and video-platform domains
 # --------------------------------------------------------------------
-# An explicit RFC 3986-ish character class instead of `\S+`. `\S+`
-# depends on each engine's own definition of "whitespace", and those
-# disagree for non-ASCII characters (e.g. U+00A0 NBSP counted as
-# non-whitespace by RE2 but as whitespace by Rust's regex crate) --
-# that let a greedy `\S+` URL match run through an NBSP and swallow
-# the next real word on DuckDB specifically. An explicit literal
-# class has no such ambiguity: every engine matches exactly these
-# characters and nothing else.
-#
-# Apostrophe (') is deliberately excluded even though it's a valid
-# (if rare) URL character: CLEAN_PATTERN_DUCKDB gets interpolated
-# into a single-quoted SQL string, and a literal `'` in the pattern
-# would break that string. Worst case a URL containing an apostrophe
-# stops matching one character early -- narrower than `\S+`.
 _URL_CHARS = r"[A-Za-z0-9._~:/?#@!$&()*+,;=%…-]"
 
-# Scheme-based URLs (http://, https://, www.) are cheap to match: every
-# engine's regex engine can key off the fixed `http`/`www` literal at the
-# start of the alternative, so this half of URL_PATTERN never showed up
-# as a cost problem on any engine. Split out as its own public name (not
-# just an inline half of URL_PATTERN) so the cuDF engine can run this
-# half against every row while running BARE_DOMAIN_PATTERN below only
-# against a pre-filtered subset -- see repository/engines/cudf.py.
-URL_SCHEME_PATTERN = rf"https?://{_URL_CHARS}+|www\.{_URL_CHARS}+"
+# Left-boundary guard for literal trigger strings that require no
+# following character to complete a match (www., and the bare-domain
+# literals below that don't require a path). Without this, the literal
+# can match wherever it happens to appear as a coincidental substring --
+# e.g. "www." inside a valid two-label email domain like "2rawww.japan",
+# or "youtube.com" inside "fooyoutube.combar" -- which is structurally
+# possible for these specifically because "." is a valid domain-label
+# separator, so the literal can sit fully inside another pattern's
+# match with nothing to stop it.
+#
+# No lookbehind support in RE2/Rust-regex/libcudf, so the boundary
+# character is consumed as part of the match rather than asserted
+# separately. That's harmless here: the boundary is required to be a
+# non-word character (not alnum, not underscore), so it was never
+# going to be part of a WORD_PATTERN match anyway, and folding it into
+# a single-space replacement doesn't merge or split anything that
+# wasn't already going to be separated.
+#
+# https?:// and the REQUIRE_PATH literals (bit.ly/t.co/goo.gl) don't
+# need this guard: EMAIL_DOMAIN's character class contains neither
+# ':' nor '/' nor '#', so none of those can structurally appear
+# embedded inside a valid email domain in the first place.
+# Bare URLs must not start immediately after '@', because '@' is
+# either an email delimiter or a mention marker.
+_URL_CHARS = r"[A-Za-z0-9._~:/?#@!$&()*+,;=%…-]"
 
-# t.co, bit.ly, and goo.gl are short/generic-looking enough that they
-# can in principle collide with an incidental substring of ordinary
-# text (e.g. a hand-typed "...want.company..." with no space after
-# the period). No engine here supports lookbehind, so we can't cheaply
-# assert "not preceded by a letter" the way a lookbehind-capable
-# engine would, and `\s`/`\b`-based alternatives reintroduce the same
-# cross-engine whitespace disagreement called out above for `\S+`.
-# Instead: a real shortlink from these three is never functional
-# without its slug, so the path segment is REQUIRED for these three
-# specifically, ruling out the bare "t.co" (nothing after it) case.
-# The remaining domains are long/distinctive enough that a bare
-# mention (no path) is still safe to treat as a link.
+# Bare URLs must not start immediately after '@', because '@' is
+# either an email delimiter or a mention marker.
+_TOKEN_BOUNDARY = r"(?:^|[^A-Za-z0-9_@])"
+
+URL_SCHEME_PATTERN = (
+    rf"https?://{_URL_CHARS}+"
+    rf"|{_TOKEN_BOUNDARY}www\.{_URL_CHARS}+"
+)
+
 _BARE_DOMAINS_REQUIRE_PATH = (
     r"bit\.ly",
     r"t\.co",
     r"goo\.gl",
 )
 
-# `youtube\.com` carries an optional `m\.` prefix in one alternative
-# (rather than two separate entries) so a mobile link is consumed as
-# a single match instead of leaving a stray "m." behind.
 _BARE_DOMAINS_OPTIONAL_PATH = (
-    r"(?:m\.)?youtube\.com",
-    r"youtu\.be",
-    r"tinyurl\.com",
-    r"linktr\.ee",
-    r"amzn\.to",
+    rf"{_TOKEN_BOUNDARY}(?:m\.)?youtube\.com",
+    rf"{_TOKEN_BOUNDARY}youtu\.be",
+    rf"{_TOKEN_BOUNDARY}tinyurl\.com",
+    rf"{_TOKEN_BOUNDARY}linktr\.ee",
+    rf"{_TOKEN_BOUNDARY}amzn\.to",
 )
 
-# Public (not underscore-prefixed): an alternation of literal domains
-# with no common anchor character is the expensive half of URL_PATTERN
-# on cuDF specifically -- libcudf's regex engine can't apply any
-# literal-prefix fast path to it, so it falls back to evaluating the
-# full automaton at every character position of every row. The cuDF
-# engine imports this directly so it can run it only against a
-# pre-filtered subset of rows instead of the full column (see
-# repository/engines/cudf.py). Keep this the single source of truth for
-# the bare-domain regex text -- do not fork a cuDF-local copy of it, or
-# the four engines drift again, which is exactly what this module
-# exists to prevent.
 BARE_DOMAIN_PATTERN = (
     rf"(?:{'|'.join(_BARE_DOMAINS_REQUIRE_PATH)})/{_URL_CHARS}+"
     rf"|(?:{'|'.join(_BARE_DOMAINS_OPTIONAL_PATH)})(?:/{_URL_CHARS}*)?"
 )
 
-# Unchanged value for DuckDB/Polars (and for anything that doesn't care
-# about the scheme/bare-domain split) -- built from the two pieces above
-# rather than redefined separately, so there's no way for this to drift
-# from what those two now say.
 URL_PATTERN = rf"{URL_SCHEME_PATTERN}|{BARE_DOMAIN_PATTERN}"
 
 # Hashtags continue until whitespace or another '#' is encountered.
@@ -182,9 +164,7 @@ MENTION_PATTERN_CUDF = r"@[^\s@#]+"
 
 CLEAN_PATTERN_POLARS = f"{URL_PATTERN}|{EMAIL_PATTERN}|{MENTION_PATTERN_POLARS}|{HASHTAG_PATTERN_POLARS}"
 CLEAN_PATTERN_DUCKDB = f"{URL_PATTERN}|{EMAIL_PATTERN}|{MENTION_PATTERN_DUCKDB}|{HASHTAG_PATTERN_DUCKDB}"
-
-# Better performance if regex are applied separately rather than combined for cuDF.
-#CLEAN_PATTERN_CUDF = f"{EMAIL_PATTERN}|{URL_PATTERN}|{MENTION_PATTERN_CUDF}|{HASHTAG_PATTERN_CUDF}"
+CLEAN_PATTERN_CUDF = f"{URL_PATTERN}|{EMAIL_PATTERN}|{MENTION_PATTERN_CUDF}|{HASHTAG_PATTERN_CUDF}"
 
 # --------------------------------------------------------------------
 # Words
