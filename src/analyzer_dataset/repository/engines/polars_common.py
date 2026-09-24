@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import polars as pl
 
-from tiktok_dataset.domain.data_quality import CORRUPTED_PAYLOAD_PATTERN
-from tiktok_dataset.domain.tokenizer import (
+from analyzer_dataset.domain.data_quality import CORRUPTED_PAYLOAD_PATTERN
+from analyzer_dataset.domain.tokenizer import (
     ASCII_LOWER_MAP,
     CLEAN_PATTERN_POLARS,
 )

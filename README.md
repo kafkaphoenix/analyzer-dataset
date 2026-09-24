@@ -1,6 +1,6 @@
-# TikTok Dataset Project
+# Social Media Dataset Project
 
-Framework offering different query engines for processing and analyzing massive TikTok datasets efficiently.
+Framework offering different query engines for processing and analyzing massive social media datasets efficiently.
 
 ## Prerequisites
 
@@ -9,14 +9,14 @@ This project is built using **Python 3.13** and uses **`uv`** for environment ma
 ## Directory Structure
 
 ```text
-tiktok-dataset/
+analyzer_dataset/
 
 ├── benchmarks/             # Automated benchmark suites
 ├── datasets/               # Input source storage (vocabulary and Parquet video data)
 ├── docs/                   # Architecture specifications and hardware reports
 ├── results/                # Query exports, performance metrics, and historical runs
 ├── src/
-│   └── tiktok_dataset/     # Package root application namespace
+│   └── analyzer_dataset/     # Package root application namespace
 │       ├── cli.py          # Command-line interface (Typer)
 │       ├── config.py       # Application configuration and settings validation
 │       ├── queries.py      # Query engine selection and construction
@@ -63,7 +63,7 @@ uv sync
 
 ### 2. Prepare Data
 
-Place the TikTok dataset files inside the `datasets/` directory.
+Place the social media dataset files inside the `datasets/` directory.
 
 The dataset and vocabulary paths can be configured through the `.env` file.
 

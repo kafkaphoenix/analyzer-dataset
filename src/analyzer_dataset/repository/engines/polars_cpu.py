@@ -5,41 +5,38 @@ from typing import cast
 
 import polars as pl
 
-from tiktok_dataset.domain.tokenizer import WORD_PATTERN_POLARS
-from tiktok_dataset.repository.engines.polars_common import clean_desc_polars
-from tiktok_dataset.repository.vocabulary import (
+from analyzer_dataset.domain.tokenizer import (
+    WORD_PATTERN_POLARS,
+)
+from analyzer_dataset.repository.engines.polars_common import clean_desc_polars
+from analyzer_dataset.repository.vocabulary import (
     load_english_words,
 )
-from tiktok_dataset.usecase.query import ProgressReporter
+from analyzer_dataset.usecase.query import ProgressReporter
 
-ENGINE = "polars_gpu"
-
-GPU_ENGINE = pl.GPUEngine(
-    raise_on_fail=True,
-)
+ENGINE = "cpu"
 
 _ROW_INDEX_COL = "_row_index"
 
 
-class GPUQuery:
+class CPUQuery:
     """
-    Hybrid Polars CPU/GPU query implementation.
+    CPU Polars implementation.
 
-    Text tokenization and regex processing run on the CPU via Polars
-    Streaming because cuDF-Polars does not natively support the
-    non-trivial regex expressions and complex list/explode operations
-    required by the tokenizer.
+    Parquet scanning, tokenization, dictionary filtering and
+    aggregation are performed using Polars on the CPU.
 
-    Once tokenized, both the per-chunk aggregation and the final
-    merge/top-k/sort run on the cuDF GPU engine.
+    Normal path: one fused query, no row index, no batching overhead.
 
-    Batching via `collect_batches` is unconditional in both paths,
-    even without monitoring, because VRAM is a much tighter ceiling
-    than system RAM. `explode()` can multiply the row count well
-    beyond what a single unbounded GPU aggregation could safely hold.
-
-    Only row-index tracking and progress callbacks differ between
-    monitored and unmonitored execution.
+    Monitored path: chunked via `collect_batches`, but progress
+    is tracked from a `_row_index` column stamped at scan time,
+    not from `batch.height` -- `chunk_size` counts OUTPUT rows
+    (post explode/join), which misrepresents how much of the
+    file was actually scanned. `max(row_index)` gives the true
+    input-row position regardless of how much explode inflated
+    or the join dropped. This also makes `maintain_order=False`
+    safe, since progress no longer assumes batches arrive in
+    file order.
     """
 
     def __init__(
@@ -67,19 +64,18 @@ class GPUQuery:
         Define the lazy transformation steps for reading, tokenizing,
         and filtering text.
 
-        The tokenization stage is deliberately executed using the
-        shared native Polars cleaning implementation. The resulting
-        plan is then consumed in streaming batches, with GPU execution
-        used for the aggregation stages.
+        This method constructs the logical execution plan without
+        executing it. It is resolved using Polars' streaming engine.
         """
         keep = [_ROW_INDEX_COL] if include_row_index else []
 
+        scan = pl.scan_parquet(
+            self.parquet_path,
+            row_index_name=(_ROW_INDEX_COL if include_row_index else None),
+        )
+
         return (
-            pl.scan_parquet(
-                self.parquet_path,
-                row_index_name=(_ROW_INDEX_COL if include_row_index else None),
-            )
-            .select(
+            scan.select(
                 *keep,
                 "views",
                 "desc",
@@ -117,38 +113,18 @@ class GPUQuery:
         )
 
     @staticmethod
-    def _aggregate_batch(
-        batch: pl.DataFrame,
-    ) -> pl.DataFrame:
-        """
-        Perform an immediate eager aggregation of the current batch
-        on the GPU.
-
-        Consolidating the exploded data immediately down to unique
-        words and view sums prevents RAM/VRAM exhaustion caused by
-        text expansion.
-        """
-        return (
-            batch.lazy()
-            .group_by("word")
-            .agg(pl.col("views").sum().alias("total_views"))
-            .collect(
-                engine=GPU_ENGINE,
-            )
-        )
-
-    @staticmethod
     def _finalize(
         partials: pl.LazyFrame,
         top_k: int,
+        value_col: str = "total_views",
     ) -> pl.DataFrame:
         """
-        Merge the per-batch results and perform the final Top-K
-        aggregation and sorting on the GPU.
+        Process the unified LazyFrame using the streaming engine
+        to run the final group-by, Top-K extraction, and sorting.
         """
         return (
             partials.group_by("word")
-            .agg(pl.col("total_views").sum().alias("total_views"))
+            .agg(pl.col(value_col).sum().alias("total_views"))
             .top_k(
                 top_k,
                 by="total_views",
@@ -158,30 +134,47 @@ class GPUQuery:
                 descending=True,
             )
             .collect(
-                engine=GPU_ENGINE,
+                engine="streaming",
             )
         )
 
-    def _process_stream(
+    def _collect(
         self,
         english_words: pl.LazyFrame,
-        progress: ProgressReporter | None = None,
     ) -> pl.DataFrame:
         """
-        Process the dataset through streaming chunks and aggregate
-        results.
+        Execute a single fused lazy query over the entire file.
 
-        Each chunk is eagerly aggregated on the GPU before the next
-        chunk is processed, keeping RAM and VRAM bounded.
-
-        When monitoring is enabled, the row index stamped at scan time
-        is used to report the true input-file progress.
+        Bypasses batching entirely when no monitoring is requested,
+        allowing Polars to optimize memory mapping and streaming
+        allocations natively.
         """
-        include_row_index = progress is not None
+        return self._finalize(
+            self._build_execution_plan(
+                english_words,
+                include_row_index=False,
+            ),
+            self.top_k,
+            value_col="views",
+        )
 
+    def _collect_monitored(
+        self,
+        english_words: pl.LazyFrame,
+        progress: ProgressReporter,
+    ) -> pl.DataFrame:
+        """
+        Execute the query through streaming chunks with real-time
+        progress monitoring.
+
+        Tracks actual read performance by extracting the maximum
+        row index position stamped at scan time from the stream.
+        Chunks are aggregated eagerly inside the loop to maintain
+        a low RAM footprint.
+        """
         query = self._build_execution_plan(
             english_words,
-            include_row_index=include_row_index,
+            include_row_index=True,
         )
 
         partial_results: list[pl.DataFrame] = []
@@ -193,31 +186,23 @@ class GPUQuery:
             engine="streaming",
         ):
             if batch.is_empty():
-                if progress is not None:
-                    progress.update(completed_rows)
+                progress.update(completed_rows)
                 continue
 
-            if progress is not None:
-                max_row_index = cast(
-                    int | None,
-                    batch[_ROW_INDEX_COL].max(),
-                )
+            max_row_index = cast(
+                int | None,
+                batch[_ROW_INDEX_COL].max(),
+            )
 
-                if max_row_index is not None:
-                    completed_rows = max(
-                        completed_rows,
-                        max_row_index + 1,
-                    )
-
-                batch = batch.drop(
-                    _ROW_INDEX_COL,
-                )
-
-                progress.update(
+            if max_row_index is not None:
+                completed_rows = max(
                     completed_rows,
+                    max_row_index + 1,
                 )
 
-            partial_results.append(self._aggregate_batch(batch))
+            partial_results.append(batch.drop(_ROW_INDEX_COL).group_by("word").agg(pl.col("views").sum().alias("total_views")))
+
+            progress.update(completed_rows)
 
         if not partial_results:
             return pl.DataFrame(
@@ -239,6 +224,7 @@ class GPUQuery:
         return self._finalize(
             partials.lazy(),
             self.top_k,
+            value_col="total_views",
         )
 
     def collect(
@@ -246,11 +232,7 @@ class GPUQuery:
         progress: ProgressReporter | None = None,
     ) -> pl.DataFrame:
         """
-        Public entry point to resolve the dataset query.
-
-        Tokenization is performed through the shared Polars cleaning
-        implementation, while batch and final aggregations are
-        executed using the cuDF-backed GPU engine.
+        Public entry point to resolve the dataset query on the CPU.
         """
         english_words = pl.DataFrame(
             {
@@ -264,9 +246,14 @@ class GPUQuery:
             }
         ).lazy()
 
-        return self._process_stream(
+        if progress is None:
+            return self._collect(
+                english_words,
+            )
+
+        return self._collect_monitored(
             english_words,
-            progress=progress,
+            progress,
         )
 
 
@@ -278,8 +265,8 @@ def build_query(
     min_word_length: int,
     batch_size: int,
     **_: object,
-) -> GPUQuery:
-    return GPUQuery(
+) -> CPUQuery:
+    return CPUQuery(
         parquet_path=parquet_path,
         english_words_path=english_words_path,
         top_k=top_k,

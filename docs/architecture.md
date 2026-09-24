@@ -1,12 +1,12 @@
 # Technical Architecture Design
 
-This document details the software design, layered data flows, execution pipeline strategies, configuration model, and engine comparison logic used in the TikTok Dataset Project.
+This document details the software design, layered data flows, execution pipeline strategies, configuration model, and engine comparison logic used in the Social Media Analyzer Dataset Project.
 
 ---
 
 ## 1. Multi-Engine Topology
 
-The project is architected to compare **four distinct execution engines** solving the same logical textual query pipeline over a large Parquet dataset:
+The project is architected to compare **four distinct execution engines** solving the same logical textual query pipeline over a large social media Parquet dataset:
 
 1. **`cpu`**: Native Polars execution on the host CPU using its vectorized Rust execution engine and streaming execution.
 
@@ -27,28 +27,28 @@ The project follows a layered architecture separating application orchestration,
 ```text
 ┌─────────────────────────────────────────────────────────┐
 │                       CLI LAYER                         │
-│                 src/tiktok_dataset/cli.py               │
+│                 src/analyzer_dataset/cli.py               │
 │       Parses commands and runtime query options         │
 └───────────────────────────┬─────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                    USECASE LAYER                        │
-│                 src/tiktok_dataset/usecase/              │
+│                 src/analyzer_dataset/usecase/              │
 │     Query orchestration, timing and progress handling   │
 └───────────────────────────┬─────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                QUERY SELECTION LAYER                    │
-│             src/tiktok_dataset/queries.py               │
+│             src/analyzer_dataset/queries.py               │
 │       Maps engine names to concrete implementations     │
 └───────────────────────────┬─────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   REPOSITORY LAYER                      │
-│              src/tiktok_dataset/repository/             │
+│              src/analyzer_dataset/repository/             │
 │                                                         │
 │   ┌─────────────────────────────────────────────────┐   │
 │   │                    engines/                     │   │
@@ -66,7 +66,7 @@ The project follows a layered architecture separating application orchestration,
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                    DOMAIN LAYER                         │
-│             src/tiktok_dataset/domain/                   │
+│             src/analyzer_dataset/domain/                   │
 │                                                         │
 │   tokenizer.py       Shared tokenizer definitions,      │
 │                      regex patterns and constants       │
@@ -133,7 +133,7 @@ The logical transformation is shared across engines, while the underlying implem
 Tokenizer definitions are centralized in:
 
 ```text
-src/tiktok_dataset/domain/tokenizer.py
+src/analyzer_dataset/domain/tokenizer.py
 ```
 
 This module contains the shared pattern definitions and constants used by the engine implementations.
@@ -367,27 +367,27 @@ Runtime configuration is loaded from environment variables using Pydantic Settin
 The default `.env` configuration used for the current benchmark environment is:
 
 ```text
-TIKTOK_DATASET=datasets/videos-00.parquet
+ANALYZER_DATASET=datasets/videos-00.parquet
 
-TIKTOK_ENGLISH_WORDS=datasets/english_words.txt
+ANALYZER_ENGLISH_WORDS=datasets/english_words.txt
 
-TIKTOK_ENGLISH_STOPWORDS=datasets/nltk_english_stopwords.txt
+ANALYZER_ENGLISH_STOPWORDS=datasets/nltk_english_stopwords.txt
 
-TIKTOK_MIN_WORD_LENGTH=3
+ANALYZER_MIN_WORD_LENGTH=3
 
-TIKTOK_RESULTS_DIR=results
+ANALYZER_RESULTS_DIR=results
 
-TIKTOK_TOP_K=5
+ANALYZER_TOP_K=5
 
-TIKTOK_DEFAULT_BATCH_SIZE_CPU=1000000
+ANALYZER_DEFAULT_BATCH_SIZE_CPU=1000000
 
-TIKTOK_DEFAULT_BATCH_SIZE_GPU=10000000
+ANALYZER_DEFAULT_BATCH_SIZE_GPU=10000000
 
-TIKTOK_CUDF_CHUNK_READ_LIMIT=1024
+ANALYZER_CUDF_CHUNK_READ_LIMIT=1024
 
-TIKTOK_DUCKDB_THREADS=16
+ANALYZER_DUCKDB_THREADS=16
 
-TIKTOK_MONITOR=true
+ANALYZER_MONITOR=true
 ```
 
 The corresponding Pydantic settings model validates these values and exposes the cuDF chunk read limit in bytes to the query implementation.

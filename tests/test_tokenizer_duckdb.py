@@ -3,14 +3,14 @@ from __future__ import annotations
 import duckdb
 
 from tests.scenarios.tokenizer_cases import TokenizerCase, strip_trailing_url_punctuation, strip_leading_url_boundary
-from tiktok_dataset.domain.tokenizer import (
+from analyzer_dataset.domain.tokenizer import (
     EMAIL_PATTERN,
     HASHTAG_PATTERN_DUCKDB,
     MENTION_PATTERN_DUCKDB,
     URL_PATTERN,
     WORD_PATTERN_DUCKDB,
 )
-from tiktok_dataset.repository.engines.duckdb import (
+from analyzer_dataset.repository.engines.duckdb import (
     clean_desc_duckdb,
 )
 
@@ -34,7 +34,7 @@ def tokenize(
             [text],
         ).fetchone()[0]
 
-        emails = list(emails)
+        emails = list(strip_trailing_url_punctuation(strip_leading_url_boundary(email)) for email in emails)
 
         # 2. Remove emails before extracting URLs.
         #

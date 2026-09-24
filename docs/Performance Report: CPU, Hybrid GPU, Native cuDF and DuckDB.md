@@ -2,14 +2,14 @@
 
 ## 1. Overview
 
-This report evaluates four implementations of the same TikTok dataset query:
+This report evaluates four implementations of the same social media dataset query:
 
 * **CPU Polars**: native CPU execution using Polars.
 * **Hybrid Polars GPU**: Polars using the cuDF-Polars GPU engine where supported, with tokenizer operations remaining on the CPU.
 * **Native cuDF**: direct GPU dataframe execution using cuDF and `pylibcudf`.
 * **DuckDB**: vectorized analytical SQL execution using DuckDB.
 
-The workload processes **166,423,554 TikTok records** and calculates the total number of views associated with the top English words appearing in video descriptions.
+The workload processes **166,423,554 social media records** and calculates the total number of views associated with the top English words appearing in video descriptions.
 
 The common logical pipeline is:
 
@@ -38,12 +38,12 @@ The primary benchmark uses the normal query execution path without explicit runt
 The current benchmark configuration uses:
 
 ```text
-TIKTOK_MIN_WORD_LENGTH=3
-TIKTOK_TOP_K=5
-TIKTOK_DEFAULT_BATCH_SIZE_CPU=1000000
-TIKTOK_DEFAULT_BATCH_SIZE_GPU=10000000
-TIKTOK_CUDF_CHUNK_READ_LIMIT=1024
-TIKTOK_DUCKDB_THREADS=16
+ANALYZER_MIN_WORD_LENGTH=3
+ANALYZER_TOP_K=5
+ANALYZER_DEFAULT_BATCH_SIZE_CPU=1000000
+ANALYZER_DEFAULT_BATCH_SIZE_GPU=10000000
+ANALYZER_CUDF_CHUNK_READ_LIMIT=1024
+ANALYZER_DUCKDB_THREADS=16
 ```
 
 ### Implementations
@@ -222,7 +222,7 @@ Earlier measurements were:
 The current configuration uses:
 
 ```text
-TIKTOK_CUDF_CHUNK_READ_LIMIT=1024
+ANALYZER_CUDF_CHUNK_READ_LIMIT=1024
 ```
 
 which corresponds to a **1024 MiB** Parquet chunk read limit.

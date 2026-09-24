@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """
     Application settings and validation schema utilizing Pydantic.
     Loads configuration matrices directly from environment variables
-    prefixed with 'TIKTOK_' or an active local '.env' file layer.
+    prefixed with 'ANALYZER_' or an active local '.env' file layer.
     """
 
     dataset: Path = Path("datasets/videos-00.parquet")
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=".env",
-        env_prefix="TIKTOK_",
+        env_prefix="ANALYZER_",
         extra="ignore",
     )
 

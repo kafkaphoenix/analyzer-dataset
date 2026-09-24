@@ -15,7 +15,7 @@ from rich.progress import (
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from tiktok_dataset.repository.system_monitor import (
+    from analyzer_dataset.repository.system_monitor import (
         SystemMetrics,
         SystemMonitor,
     )
@@ -61,7 +61,7 @@ class ProcessMonitor:
 
     def start(self) -> None:
         """Start the live view and initialize system monitoring."""
-        from tiktok_dataset.repository.system_monitor import (
+        from analyzer_dataset.repository.system_monitor import (
             SystemMonitor,
         )
 

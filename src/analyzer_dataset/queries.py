@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tiktok_dataset.repository.engines.cudf import (
+from analyzer_dataset.repository.engines.cudf import (
     GPUCUDFQuery,
 )
-from tiktok_dataset.repository.engines.duckdb import (
+from analyzer_dataset.repository.engines.duckdb import (
     DuckDBQuery,
 )
-from tiktok_dataset.repository.engines.polars_cpu import (
+from analyzer_dataset.repository.engines.polars_cpu import (
     CPUQuery,
 )
-from tiktok_dataset.repository.engines.polars_gpu import (
+from analyzer_dataset.repository.engines.polars_gpu import (
     GPUQuery,
 )
-from tiktok_dataset.usecase.query import Query, QueryBuilder
+from analyzer_dataset.usecase.query import Query, QueryBuilder
 
 
 def build_cpu(

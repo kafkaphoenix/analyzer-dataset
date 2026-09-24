@@ -8,20 +8,20 @@ import duckdb
 import polars as pl
 import pyarrow as pa
 
-from tiktok_dataset.domain.data_quality import (
+from analyzer_dataset.domain.data_quality import (
     CORRUPTED_PAYLOAD_MARKER,
     CORRUPTED_PAYLOAD_PATTERN,
 )
-from tiktok_dataset.domain.tokenizer import (
+from analyzer_dataset.domain.tokenizer import (
     ASCII_LOWER,
     ASCII_UPPER,
     CLEAN_PATTERN_DUCKDB,
     WORD_PATTERN_DUCKDB,
 )
-from tiktok_dataset.repository.vocabulary import (
+from analyzer_dataset.repository.vocabulary import (
     load_english_words,
 )
-from tiktok_dataset.usecase.query import ProgressReporter
+from analyzer_dataset.usecase.query import ProgressReporter
 
 ENGINE = "duckdb"
 

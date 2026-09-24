@@ -259,8 +259,8 @@ HASHTAGS_NON_LATIN_CASES = (
 
     TokenizerCase(
         name="devanagari punctuation inside hashtag",
-        text="#।tiktokbangladesh",
-        expected_hashtags=("#।tiktokbangladesh",),
+        text="#।thisbangladesh",
+        expected_hashtags=("#।thisbangladesh",),
         expected_words=(),
         expected_tokens="",
     ),

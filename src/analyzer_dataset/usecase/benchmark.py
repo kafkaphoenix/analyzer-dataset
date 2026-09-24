@@ -6,8 +6,8 @@ from pathlib import Path
 
 import polars as pl
 
-from tiktok_dataset.usecase.monitor import ProcessMonitor
-from tiktok_dataset.usecase.query import Query
+from analyzer_dataset.usecase.monitor import ProcessMonitor
+from analyzer_dataset.usecase.query import Query
 
 
 def benchmark(

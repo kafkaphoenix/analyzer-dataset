@@ -6,13 +6,13 @@ import click
 import typer
 from pyarrow import parquet
 
-from tiktok_dataset.config import Settings
-from tiktok_dataset.queries import QUERIES
-from tiktok_dataset.usecase.benchmark import benchmark
+from analyzer_dataset.config import Settings
+from analyzer_dataset.queries import QUERIES
+from analyzer_dataset.usecase.benchmark import benchmark
 
 app = typer.Typer(
-    name="tiktok-benchmark",
-    help="Benchmark TikTok dataset query engines.",
+    name="analyzer-benchmark",
+    help="Benchmark analyzer dataset query engines.",
 )
 
 
@@ -68,7 +68,7 @@ def run(
         ),
     ] = None,
 ) -> None:
-    """Process the TikTok dataset with the selected query engine."""
+    """Process the analyzer dataset with the selected query engine."""
 
     # Construct an overrides dictionary using only the explicitly passed CLI options
     overrides: dict[str, Any] = {}

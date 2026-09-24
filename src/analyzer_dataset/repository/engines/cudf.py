@@ -7,10 +7,10 @@ import polars as pl
 import pyarrow as pa
 import pylibcudf as plc
 
-from tiktok_dataset.domain.data_quality import (
+from analyzer_dataset.domain.data_quality import (
     CORRUPTED_PAYLOAD_PATTERN,
 )
-from tiktok_dataset.domain.tokenizer import (
+from analyzer_dataset.domain.tokenizer import (
     ASCII_LOWER_MAP,
     BARE_DOMAIN_PATTERN,
     CLEAN_PATTERN_CUDF,
@@ -20,10 +20,10 @@ from tiktok_dataset.domain.tokenizer import (
     URL_SCHEME_PATTERN,
     WORD_PATTERN_CUDF,
 )
-from tiktok_dataset.repository.vocabulary import (
+from analyzer_dataset.repository.vocabulary import (
     load_english_words,
 )
-from tiktok_dataset.usecase.query import ProgressReporter
+from analyzer_dataset.usecase.query import ProgressReporter
 
 ENGINE = "cudf"
 
@@ -43,53 +43,39 @@ _EMPTY_REPLACEMENT = plc.Scalar.from_arrow(
     )
 )
 
-_CORRUPTED_PAYLOAD_PROGRAM = (
-    plc.strings.regex_program.RegexProgram.create(
-        CORRUPTED_PAYLOAD_PATTERN,
-        _REGEX_DEFAULT_FLAGS,
-    )
+_CORRUPTED_PAYLOAD_PROGRAM = plc.strings.regex_program.RegexProgram.create(
+    CORRUPTED_PAYLOAD_PATTERN,
+    _REGEX_DEFAULT_FLAGS,
 )
 
-_CLEAN_PROGRAM = (
-    plc.strings.regex_program.RegexProgram.create(
-        CLEAN_PATTERN_CUDF,
-        _REGEX_DEFAULT_FLAGS,
-    )
+_CLEAN_PROGRAM = plc.strings.regex_program.RegexProgram.create(
+    CLEAN_PATTERN_CUDF,
+    _REGEX_DEFAULT_FLAGS,
 )
 
-_EMAIL_PROGRAM = (
-    plc.strings.regex_program.RegexProgram.create(
-        EMAIL_PATTERN,
-        _REGEX_DEFAULT_FLAGS,
-    )
+_EMAIL_PROGRAM = plc.strings.regex_program.RegexProgram.create(
+    EMAIL_PATTERN,
+    _REGEX_DEFAULT_FLAGS,
 )
 
-_MENTION_PROGRAM = (
-    plc.strings.regex_program.RegexProgram.create(
-        MENTION_PATTERN_CUDF,
-        _REGEX_DEFAULT_FLAGS,
-    )
+_MENTION_PROGRAM = plc.strings.regex_program.RegexProgram.create(
+    MENTION_PATTERN_CUDF,
+    _REGEX_DEFAULT_FLAGS,
 )
 
-_URL_SCHEME_PROGRAM = (
-    plc.strings.regex_program.RegexProgram.create(
-        URL_SCHEME_PATTERN,
-        _REGEX_DEFAULT_FLAGS,
-    )
+_URL_SCHEME_PROGRAM = plc.strings.regex_program.RegexProgram.create(
+    URL_SCHEME_PATTERN,
+    _REGEX_DEFAULT_FLAGS,
 )
 
-_BARE_DOMAIN_PROGRAM = (
-    plc.strings.regex_program.RegexProgram.create(
-        BARE_DOMAIN_PATTERN,
-        _REGEX_DEFAULT_FLAGS,
-    )
+_BARE_DOMAIN_PROGRAM = plc.strings.regex_program.RegexProgram.create(
+    BARE_DOMAIN_PATTERN,
+    _REGEX_DEFAULT_FLAGS,
 )
 
-_HASHTAG_PROGRAM = (
-    plc.strings.regex_program.RegexProgram.create(
-        HASHTAG_PATTERN_CUDF,
-        _REGEX_DEFAULT_FLAGS,
-    )
+_HASHTAG_PROGRAM = plc.strings.regex_program.RegexProgram.create(
+    HASHTAG_PATTERN_CUDF,
+    _REGEX_DEFAULT_FLAGS,
 )
 
 # Cheap literal substrings used only to build candidate-row masks.
@@ -160,11 +146,7 @@ def _first_literal_position(
         position = series.str.find(literal)
 
         result = result.where(
-            (position < 0)
-            | (
-                (result >= 0)
-                & (result <= position)
-            ),
+            (position < 0) | ((result >= 0) & (result <= position)),
             position,
         )
 
@@ -202,15 +184,12 @@ def _ambiguous_overlap_mask(
     These rows cannot safely use the normal sequential cleanup because
     the combined regex gives precedence to whichever token starts first.
     """
-    marker_mask = (
-        desc.str.contains(
-            "@",
-            regex=False,
-        )
-        | desc.str.contains(
-            "#",
-            regex=False,
-        )
+    marker_mask = desc.str.contains(
+        "@",
+        regex=False,
+    ) | desc.str.contains(
+        "#",
+        regex=False,
     )
 
     url_candidate_mask = (
@@ -229,10 +208,7 @@ def _ambiguous_overlap_mask(
         )
     )
 
-    candidate_mask = (
-        marker_mask
-        & url_candidate_mask
-    )
+    candidate_mask = marker_mask & url_candidate_mask
 
     if not bool(candidate_mask.any()):
         return cudf.Series(
@@ -247,11 +223,7 @@ def _ambiguous_overlap_mask(
     hash_position = candidate.str.find("#")
 
     marker_position = at_position.where(
-        (at_position >= 0)
-        & (
-            (hash_position < 0)
-            | (at_position < hash_position)
-        ),
+        (at_position >= 0) & ((hash_position < 0) | (at_position < hash_position)),
         hash_position,
     )
 
@@ -273,28 +245,16 @@ def _ambiguous_overlap_mask(
     url_position = scheme_position
 
     url_position = url_position.where(
-        (www_position < 0)
-        | (
-            (url_position >= 0)
-            & (url_position <= www_position)
-        ),
+        (www_position < 0) | ((url_position >= 0) & (url_position <= www_position)),
         www_position,
     )
 
     url_position = url_position.where(
-        (bare_domain_position < 0)
-        | (
-            (url_position >= 0)
-            & (url_position <= bare_domain_position)
-        ),
+        (bare_domain_position < 0) | ((url_position >= 0) & (url_position <= bare_domain_position)),
         bare_domain_position,
     )
 
-    ambiguous_candidate = (
-        (marker_position >= 0)
-        & (url_position >= 0)
-        & (marker_position < url_position)
-    )
+    ambiguous_candidate = (marker_position >= 0) & (url_position >= 0) & (marker_position < url_position)
 
     # Reconstruct the full mask without boolean scatter assignment.
     #
@@ -348,14 +308,10 @@ def _clean_normal_rows(
         _REPLACEMENT_SPACE,
     )
 
-    normal_bare_domain_mask = bare_domain_mask.loc[
-        desc.index
-    ]
+    normal_bare_domain_mask = bare_domain_mask.loc[desc.index]
 
     if bool(normal_bare_domain_mask.any()):
-        subset = desc.loc[
-            normal_bare_domain_mask
-        ]
+        subset = desc.loc[normal_bare_domain_mask]
 
         subset = _replace_re(
             subset,
@@ -436,13 +392,9 @@ def clean_desc_cudf(
         )
 
     # Split using the validated mask.
-    ambiguous = desc.loc[
-        ambiguous_mask
-    ]
+    ambiguous = desc.loc[ambiguous_mask]
 
-    normal = desc.loc[
-        ~ambiguous_mask
-    ]
+    normal = desc.loc[~ambiguous_mask]
 
     # 5. Correct path for overlapping tokens.
     ambiguous = _replace_re(
@@ -452,9 +404,7 @@ def clean_desc_cudf(
     )
 
     # 6. Fast path for everything else.
-    normal_bare_domain_mask = bare_domain_mask.loc[
-        normal.index
-    ]
+    normal_bare_domain_mask = bare_domain_mask.loc[normal.index]
 
     normal = _clean_normal_rows(
         normal,
@@ -472,6 +422,7 @@ def clean_desc_cudf(
     result.index = original_index
 
     return result
+
 
 def clean_desc_cudf_fast(
     desc: cudf.Series,
@@ -502,7 +453,7 @@ def clean_desc_cudf_fast(
       and HASHTAG match almost anything except whitespace/@/#,
       including every emoji and every Unicode script. Running
       mention/hashtag first lets that broad class swallow a URL glued
-      directly onto it (common in TikTok bios: "@promobit.ly/deal")
+      directly onto it (common in social media bios: "@promobit.ly/deal")
       plus whatever real word follows through an emoji separator,
       since nothing but whitespace stops it.
     - URL_SCHEME runs before BARE_DOMAIN, and BARE_DOMAIN runs before
@@ -549,9 +500,7 @@ def clean_desc_cudf_fast(
     # ---------------------------------------------------------------
     # 2. ASCII lowercase A-Z.
     # ---------------------------------------------------------------
-    desc = desc.str.translate(
-        ASCII_LOWER_MAP
-    )
+    desc = desc.str.translate(ASCII_LOWER_MAP)
 
     # ---------------------------------------------------------------
     # 3. Remove scheme-based URLs.
@@ -581,23 +530,12 @@ def clean_desc_cudf_fast(
             regex=False,
         )
 
-        bare_domain_mask = (
-            hit
-            if bare_domain_mask is None
-            else bare_domain_mask | hit
-        )
+        bare_domain_mask = hit if bare_domain_mask is None else bare_domain_mask | hit
 
-    if (
-        bare_domain_mask is not None
-        and bare_domain_mask.any()
-    ):
-        subset = desc.loc[
-            bare_domain_mask
-        ]
+    if bare_domain_mask is not None and bare_domain_mask.any():
+        subset = desc.loc[bare_domain_mask]
 
-        sub_col, sub_meta = (
-            subset.to_pylibcudf()
-        )
+        sub_col, sub_meta = subset.to_pylibcudf()
 
         sub_col = plc.strings.replace_re.replace_re(
             sub_col,
@@ -611,9 +549,7 @@ def clean_desc_cudf_fast(
         )
         replaced.index = subset.index
 
-        desc.loc[
-            bare_domain_mask
-        ] = replaced
+        desc.loc[bare_domain_mask] = replaced
 
     # ---------------------------------------------------------------
     # 5. Remove emails.
@@ -715,18 +651,10 @@ class GPUCUDFQuery:
 
         # clean_desc_cudf() preserves the original index through all
         # pylibcudf round-trips, which keeps desc aligned with views.
-        desc = clean_desc_cudf_fast(
-            df["desc"]
-        )
+        desc = clean_desc_cudf_fast(df["desc"])
 
         # Extract unique tokens per description.
-        words = (
-            desc
-            .str.findall(
-                WORD_PATTERN_CUDF
-            )
-            .list.unique()
-        )
+        words = desc.str.findall(WORD_PATTERN_CUDF).list.unique()
 
         df = cudf.DataFrame(
             {
@@ -736,16 +664,10 @@ class GPUCUDFQuery:
         )
 
         # Explode arrays into individual rows.
-        df = (
-            df
-            .explode(
-                "word",
-                ignore_index=True,
-            )
-            .dropna(
-                subset=["word"]
-            )
-        )
+        df = df.explode(
+            "word",
+            ignore_index=True,
+        ).dropna(subset=["word"])
 
         if len(df) == 0:
             return None
@@ -765,15 +687,12 @@ class GPUCUDFQuery:
         # cuDF returns int64 from the sum even though views are uint64,
         # so explicitly restore uint64.
         return (
-            df
-            .groupby(
+            df.groupby(
                 "word",
                 sort=False,
             )["views"]
             .sum()
-            .reset_index(
-                name="total_views"
-            )
+            .reset_index(name="total_views")
             .astype(
                 {
                     "total_views": "uint64",
@@ -790,17 +709,10 @@ class GPUCUDFQuery:
         Stream Parquet chunks via pylibcudf, updating progress and
         collecting GPU partial sums.
         """
-        source = plc.io.SourceInfo(
-            [
-                str(
-                    self.parquet_path
-                )
-            ]
-        )
+        source = plc.io.SourceInfo([str(self.parquet_path)])
 
         options = (
-            plc.io.parquet.ParquetReaderOptions
-            .builder(source)
+            plc.io.parquet.ParquetReaderOptions.builder(source)
             .column_names(
                 [
                     "views",
@@ -815,37 +727,26 @@ class GPUCUDFQuery:
             chunk_read_limit=self.chunk_read_limit,
         )
 
-        partial_results: list[
-            cudf.DataFrame
-        ] = []
+        partial_results: list[cudf.DataFrame] = []
 
         completed_rows = 0
 
         while reader.has_next():
             table = reader.read_chunk()
 
-            df = cudf.DataFrame.from_pylibcudf(
-                table
-            )
+            df = cudf.DataFrame.from_pylibcudf(table)
 
             if progress is not None:
                 completed_rows += len(df)
-                progress.update(
-                    completed_rows
-                )
+                progress.update(completed_rows)
 
             partial = self._process_dataframe(
                 df,
                 english_words,
             )
 
-            if (
-                partial is not None
-                and len(partial) > 0
-            ):
-                partial_results.append(
-                    partial
-                )
+            if partial is not None and len(partial) > 0:
+                partial_results.append(partial)
 
         if not partial_results:
             return cudf.DataFrame(
@@ -888,8 +789,7 @@ class GPUCUDFQuery:
             )
 
         final = (
-            partials
-            .groupby(
+            partials.groupby(
                 "word",
                 sort=False,
             )["total_views"]
@@ -903,22 +803,15 @@ class GPUCUDFQuery:
         )
 
         final = (
-            final
-            .sort_values(
+            final.sort_values(
                 "total_views",
                 ascending=False,
             )
-            .head(
-                top_k
-            )
-            .reset_index(
-                drop=True
-            )
+            .head(top_k)
+            .reset_index(drop=True)
         )
 
-        return pl.DataFrame(
-            final.to_arrow()
-        )
+        return pl.DataFrame(final.to_arrow())
 
     def collect(
         self,

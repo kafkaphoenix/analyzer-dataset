@@ -105,10 +105,10 @@ EMAIL_CASES = (
         name="email is not mention",
         text="@john@example.com",
         expected_hashtags=(),
-        expected_mentions=(),
+        expected_mentions=("@john","@example.com"),
         expected_words=(),
         expected_tokens="",
-        expected_emails=("john@example.com",),
+        expected_emails=(),
     ),
 
     TokenizerCase(

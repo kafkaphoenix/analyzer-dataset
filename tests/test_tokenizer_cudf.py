@@ -7,7 +7,7 @@ from tests.scenarios.tokenizer_cases import (
     strip_trailing_url_punctuation,
     strip_leading_url_boundary,
 )
-from tiktok_dataset.domain.tokenizer import (
+from analyzer_dataset.domain.tokenizer import (
     BARE_DOMAIN_PATTERN,
     EMAIL_PATTERN,
     HASHTAG_PATTERN_CUDF,
@@ -16,7 +16,7 @@ from tiktok_dataset.domain.tokenizer import (
     URL_SCHEME_PATTERN,
     WORD_PATTERN_CUDF,
 )
-from tiktok_dataset.repository.engines.cudf import clean_desc_cudf_fast
+from analyzer_dataset.repository.engines.cudf import clean_desc_cudf_fast
 
 
 def tokenize(
@@ -61,7 +61,7 @@ def tokenize(
         EMAIL_PATTERN,
     ).iloc[0]
 
-    emails = list(emails) if emails is not None else []
+    emails = list(strip_trailing_url_punctuation(strip_leading_url_boundary(email)) for email in emails)
 
     source = source.str.replace(
         EMAIL_PATTERN,

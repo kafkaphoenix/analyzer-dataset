@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tiktok_dataset.domain.data_quality import clean_corrupted_desc
+from analyzer_dataset.domain.data_quality import clean_corrupted_desc
 
 
 @pytest.mark.parametrize(

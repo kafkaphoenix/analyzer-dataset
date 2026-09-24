@@ -9,25 +9,24 @@ import duckdb
 import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
-
-from tiktok_dataset.domain.data_quality import (
+from analyzer_dataset.domain.data_quality import (
     CORRUPTED_PAYLOAD_MARKER,
 )
-from tiktok_dataset.domain.tokenizer import (
+from analyzer_dataset.domain.tokenizer import (
     WORD_PATTERN_CUDF,
     WORD_PATTERN_DUCKDB,
     WORD_PATTERN_POLARS,
 )
-from tiktok_dataset.repository.engines.cudf import (
+from analyzer_dataset.repository.engines.cudf import (
     clean_desc_cudf_fast,
 )
-from tiktok_dataset.repository.engines.duckdb import (
+from analyzer_dataset.repository.engines.duckdb import (
     clean_desc_duckdb,
 )
-from tiktok_dataset.repository.engines.polars_common import (
+from analyzer_dataset.repository.engines.polars_common import (
     clean_desc_polars,
 )
-from tiktok_dataset.repository.vocabulary import (
+from analyzer_dataset.repository.vocabulary import (
     load_english_words,
 )
 
@@ -602,40 +601,28 @@ def compare_word_rows(
     cudf_ids = cudf_result.select("row_id")
     duckdb_ids = duckdb_result.select("row_id")
 
-    polars_only = (
-        polars_result
-        .join(
-            cudf_ids,
-            on="row_id",
-            how="anti",
-        )
-        .with_columns(
-            pl.lit("polars_only").alias("difference"),
-        )
+    polars_only = polars_result.join(
+        cudf_ids,
+        on="row_id",
+        how="anti",
+    ).with_columns(
+        pl.lit("polars_only").alias("difference"),
     )
 
-    cudf_only = (
-        cudf_result
-        .join(
-            polars_ids,
-            on="row_id",
-            how="anti",
-        )
-        .with_columns(
-            pl.lit("cudf_only").alias("difference"),
-        )
+    cudf_only = cudf_result.join(
+        polars_ids,
+        on="row_id",
+        how="anti",
+    ).with_columns(
+        pl.lit("cudf_only").alias("difference"),
     )
 
-    duckdb_only = (
-        duckdb_result
-        .join(
-            polars_ids,
-            on="row_id",
-            how="anti",
-        )
-        .with_columns(
-            pl.lit("duckdb_only_vs_polars").alias("difference"),
-        )
+    duckdb_only = duckdb_result.join(
+        polars_ids,
+        on="row_id",
+        how="anti",
+    ).with_columns(
+        pl.lit("duckdb_only_vs_polars").alias("difference"),
     )
 
     if not polars_only.is_empty():

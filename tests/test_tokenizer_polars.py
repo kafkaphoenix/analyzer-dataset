@@ -3,14 +3,14 @@ from __future__ import annotations
 import polars as pl
 
 from tests.scenarios.tokenizer_cases import TokenizerCase, strip_trailing_url_punctuation, strip_leading_url_boundary
-from tiktok_dataset.domain.tokenizer import (
+from analyzer_dataset.domain.tokenizer import (
     EMAIL_PATTERN,
     HASHTAG_PATTERN_POLARS,
     MENTION_PATTERN_POLARS,
     URL_PATTERN,
     WORD_PATTERN_POLARS,
 )
-from tiktok_dataset.repository.engines.polars_common import clean_desc_polars
+from analyzer_dataset.repository.engines.polars_common import clean_desc_polars
 
 
 def tokenize(
@@ -27,6 +27,8 @@ def tokenize(
         )["matches"][0]
         .to_list()
     )
+
+    emails = list(strip_trailing_url_punctuation(strip_leading_url_boundary(email)) for email in emails)
 
     # 2. Extract URLs after removing emails.
     #
