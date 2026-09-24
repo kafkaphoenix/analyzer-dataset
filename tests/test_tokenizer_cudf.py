@@ -16,7 +16,7 @@ from analyzer_dataset.domain.tokenizer import (
     URL_SCHEME_PATTERN,
     WORD_PATTERN_CUDF,
 )
-from analyzer_dataset.repository.engines.cudf import clean_desc_cudf_fast
+from analyzer_dataset.repository.engines.cudf import clean_desc_cudf
 
 
 def tokenize(
@@ -96,7 +96,7 @@ def tokenize(
     )
 
     # Words come directly from the real production implementation.
-    cleaned = clean_desc_cudf_fast(
+    cleaned = clean_desc_cudf(
         df["text"],
     )
 

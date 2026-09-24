@@ -135,7 +135,7 @@ EMAIL_LOCAL = rf"{_EMAIL_LOCAL_CHARS}+(?:\.{_EMAIL_LOCAL_CHARS}+)*"
 _EMAIL_DOMAIN_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
 EMAIL_DOMAIN = rf"{_EMAIL_DOMAIN_LABEL}(?:\.{_EMAIL_DOMAIN_LABEL})+"
 
-EMAIL_PATTERN = rf"(?:^|[^@A-Za-z0-9_]){EMAIL_LOCAL}@{EMAIL_DOMAIN}"
+EMAIL_PATTERN = rf"{EMAIL_LOCAL}@{EMAIL_DOMAIN}"
 
 # The trailing negative lookahead prevents partial matches such as
 # "foo@example.com_extra", but libcudf's regex engine does not support
